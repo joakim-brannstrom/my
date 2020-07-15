@@ -13,12 +13,16 @@ struct Path {
     private string value_;
 
     this(string s) @safe nothrow {
-        const h = s.hashOf;
-        if (auto v = h in pathCache) {
-            value_ = *v;
-        } else {
-            pathCache[h] = s;
+        if (__ctfe) {
             value_ = s;
+        } else {
+            const h = s.hashOf;
+            if (auto v = h in pathCache) {
+                value_ = *v;
+            } else {
+                pathCache[h] = s;
+                value_ = s;
+            }
         }
     }
 
@@ -110,21 +114,29 @@ struct AbsolutePath {
         value_ = p.value_;
     }
 
-    Path opBinary(string op)(string rhs) @safe {
+    void opAssign(Path p) @safe {
+        value_ = p.AbsolutePath.value_;
+    }
+
+    Path opBinary(string op, T)(T rhs) @safe if (is(T == string) || is(T == Path)) {
         static if (op == "~") {
-            return AbsolutePath(buildPath(value_, rhs));
+            return value_ ~ rhs;
         } else
             static assert(false, typeof(this).stringof ~ " does not have operator " ~ op);
     }
 
-    void opOpAssign(string op)(string rhs) @safe nothrow {
+    void opOpAssign(string op)(T rhs) @safe if (is(T == string) || is(T == Path)) {
         static if (op == "~=") {
-            value_ = AbsolutePath(buildPath(value_, rhs));
+            value_ = AbsolutePath(value_ ~ rhs).value_;
         } else
             static assert(false, typeof(this).stringof ~ " does not have operator " ~ op);
     }
 
     string opCast(T : string)() pure nothrow const @nogc {
+        return value_;
+    }
+
+    Path opCast(T : Path)() pure nothrow const @nogc {
         return value_;
     }
 

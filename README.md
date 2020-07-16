@@ -5,41 +5,27 @@ in personal scripts and program.
 
 It is made for my personal needs so if you use it be aware that it may change
 at any time. But well, the API will be pretty stable because changes to it
-leads to a multitude of my personal scripts and programs breaking.
+leads to a multitude of my personal scripts and programs breaking. I chose to
+put it up on github both to make it easier for myself to reuse it in my
+programs and to share with others.
+
+Other OS's than Linux are not supported. Some things may work, some may not. I
+haven't tested.
 
 # Getting Started
 
-mylib depends on the following software packages:
+Add this line to your dub configuration:
 
- * [D compiler](https://dlang.org/download.html) (dmd 2.079+, ldc 1.11.0+)
-
-It is recommended to install the D compiler by downloading it from the official distribution page.
 ```sh
-# link https://dlang.org/download.html
-curl -fsS https://dlang.org/install.sh | bash -s dmd
-```
-
-For users running Ubuntu one of the dependencies can be installed with apt.
-```sh
-sudo apt install x
-```
-
-Download the D compiler of your choice, extract it and add to your PATH shell
-variable.
-```sh
-# example with an extracted DMD
-export PATH=/path/to/dmd/linux/bin64/:$PATH
-```
-
-Once the dependencies are installed it is time to download the source code to install mylib.
-```sh
-git clone https://github.com/joakim-brannstrom/mylib.git
-cd mylib
-dub build -b release
+dependency "my" version="~>0.0.2"
 ```
 
 Done! Have fun.
-Don't be shy to report any issue that you find.
+
+Don't be shy to report any issue that you find. I mean, if you find a bug then
+I definitely wants to know about it because it affectsd me as much as you!.
 
 # Credit
-TODO
+
+Various authors on the D-forum. Some of the code herein is from code snippets
+posted on the forum that I have found useful in my projects.

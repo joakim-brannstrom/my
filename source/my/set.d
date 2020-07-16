@@ -8,6 +8,10 @@ module my.set;
 import std.algorithm : filter;
 import std.range : ElementType, isOutputRange;
 
+version (unittest) {
+    import unit_threaded.assertions;
+}
+
 struct Set(T) {
     alias Type = void[0][T];
     Type data;
@@ -74,9 +78,9 @@ struct Set(T) {
      */
     Set!T symmetricDifference(Set!T set) {
         typeof(this) r;
-        foreach (k; toRange.filter!(a => !contains(a)))
+        foreach (k; toRange.filter!(a => !set.contains(a)))
             r.add(k);
-        foreach (k; toRange.filter!(a => !contains(a)))
+        foreach (k; set.toRange.filter!(a => !contains(a)))
             r.add(k);
 
         return r;
@@ -132,4 +136,14 @@ auto toSet(RangeT)(RangeT range) {
     foreach (item; range)
         result.add(item);
     return result;
+}
+
+@("shall calculate the symmetric difference between two sets")
+unittest {
+    import std.algorithm : sort;
+
+    auto a = [1, 2, 3, 4, 5].toSet;
+    auto b = [4, 5, 6, 7, 8].toSet;
+
+    a.symmetricDifference(b).toArray.sort.shouldEqual([1, 2, 3, 6, 7, 8]);
 }

@@ -4,15 +4,19 @@ authors "Joakim Brännström"
 copyright "Copyright © 2019, Joakim Brännström"
 license "BSL-1.0"
 
+dependency "sumtype" version="~>0.9.4" optional=false default=true
+
 targetPath "build"
 
-dependency "sumtype" version="~>0.9.4" optional=false default=true
+dflags "-verrors=context"
 
 configuration "library" {
     targetType "library"
 }
 
 configuration "unittest" {
+    //dflags "-checkaction=context"
+
     dependency "unit-threaded" version="~>1.0.4"
     targetType "executable"
     targetName "unittest"

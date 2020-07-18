@@ -60,6 +60,8 @@ import std.path : dirName, baseName, buildPath;
 struct Path {
     private string value_;
 
+    alias value this;
+
     this(string s) @safe nothrow {
         if (__ctfe) {
             value_ = s;
@@ -72,6 +74,11 @@ struct Path {
                 value_ = s;
             }
         }
+    }
+
+    /// Returns: the underlying `string`.
+    string value() @safe pure nothrow const @nogc {
+        return value_;
     }
 
     bool empty() @safe pure nothrow const @nogc {
@@ -158,6 +165,8 @@ struct AbsolutePath {
 
     private Path value_;
 
+    alias value this;
+
     this(AbsolutePath p) @safe pure nothrow @nogc {
         value_ = p.value_;
     }
@@ -168,6 +177,11 @@ struct AbsolutePath {
 
     this(Path p) @safe {
         value_ = Path(p.value_.expandTilde.absolutePath.buildNormalizedPath);
+    }
+
+    /// Returns: the underlying `Path`.
+    Path value() @safe pure nothrow const @nogc {
+        return value_;
     }
 
     void opAssign(AbsolutePath p) @safe pure nothrow @nogc {
@@ -227,8 +241,8 @@ struct AbsolutePath {
         return a;
     }
 
-    string baseName() @safe const {
-        return value_.baseName;
+    Path baseName() @safe const {
+        return value_.baseName.Path;
     }
 }
 
@@ -249,4 +263,15 @@ unittest {
 
     AbsolutePath(Path(".")).toString.canFind('.').shouldBeFalse;
     AbsolutePath(Path(".")).toString.canFind('.').shouldBeFalse;
+}
+
+@("shall create a compile time Path")
+unittest {
+    enum a = Path("A");
+}
+
+@("shall subtype to a string")
+unittest {
+    string a = Path("a");
+    string b = AbsolutePath(Path("a"));
 }

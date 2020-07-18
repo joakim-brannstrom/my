@@ -48,14 +48,6 @@ import std.path : dirName, baseName, buildPath;
  * auto a = Path("foo");
  * writeln(exists(a));
  * ---
- *
- * The string that represent paths are deduplicated and cached. This is to
- * reduce the amount of memory that paths in your program occupy. This either
- * have none impact on your program or it may be significant. Usually you do
- * not have to care about this fact, the type do it for you.
- *
- * TODO: maybe make the cache:ing configurable and global? It is currenly
- * thread local and the cache is unbounded.
  */
 struct Path {
     private string value_;
@@ -64,17 +56,7 @@ struct Path {
 
     ///
     this(string s) @safe nothrow {
-        if (__ctfe) {
-            value_ = s;
-        } else {
-            const h = s.hashOf;
-            if (auto v = h in pathCache) {
-                value_ = *v;
-            } else {
-                pathCache[h] = s;
-                value_ = s;
-            }
-        }
+        value_ = s;
     }
 
     /// Returns: the underlying `string`.
@@ -142,21 +124,6 @@ struct Path {
     string baseName() @safe const {
         return value_.baseName;
     }
-
-    private static string fromCache(size_t h) {
-        if (pathCache.length > 1024) {
-            pathCache = null;
-        }
-        if (auto v = h in pathCache) {
-            return *v;
-        }
-        return null;
-    }
-}
-
-private {
-    // Reduce memory usage by reusing paths.
-    private string[size_t] pathCache;
 }
 
 /** The path is guaranteed to be the absolute, normalized and tilde expanded

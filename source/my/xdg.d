@@ -11,10 +11,16 @@ module my.xdg;
 
 import my.path;
 
-/** Extracts the directory to use for program runtime data for the current user.
+/** Returns the directory to use for program runtime data for the current
+ * user with a fallback for older OS:es.
  *
- * The fallback is used when the variable is not set. This is common on e.g.
- * older versions of Linux such as CentOS6.
+ * `$XDG_RUNTIME_DIR` isn't set on all OS such as older versions of CentOS. If
+ * such is the case a directory with equivalent properties when it comes to the
+ * permissions are created inside `falllback` and returned. This means that
+ * this function should in most cases work. When it fails it means something
+ * funky is happening such as someone is trying to hijack your data or
+ * `fallback` isn't writable. This is the only case when it will throw an
+ * exception.
  *
  * From the specification:
  *
@@ -49,8 +55,61 @@ import my.path;
  * purposes and should not place larger files in it, since it might reside in
  * runtime memory and cannot necessarily be swapped out to disk.
  */
-Path xdgRuntimeDir(Path fallback) {
+Path xdgRuntimeDir(Path fallback = Path("/tmp")) @safe {
+    import std.array : empty;
     import std.process : environment;
 
-    return Path(environment.get("XDG_RUNTIME_DIR", fallback));
+    Path backup() @trusted {
+        import core.stdc.stdio : perror;
+        import core.sys.posix.sys.stat : mkdir;
+        import core.sys.posix.sys.stat;
+        import core.sys.posix.unistd : getuid;
+        import std.file : exists;
+        import std.format : format;
+        import std.string : toStringz;
+
+        const base = fallback ~ format!"user_%s"(getuid);
+        string rval;
+
+        foreach (i; 0 .. 1000) {
+            // create
+            rval = format!"%s_%s"(base, i);
+            const cstr = rval.toStringz;
+
+            if (!exists(rval)) {
+                if (mkdir(cstr, S_IRWXU) != 0) {
+                    continue;
+                }
+            }
+
+            // validate
+            stat_t st;
+            stat(cstr, &st);
+            if (st.st_uid == getuid && (st.st_mode & S_IFDIR) != 0) {
+                break;
+            }
+
+            // try again
+            rval = null;
+        }
+
+        if (rval.empty) {
+            perror(null);
+            throw new Exception("Unable to create XDG_RUNTIME_DIR " ~ rval);
+        }
+        return Path(rval);
+    }
+
+    auto xdg = environment.get("XDG_RUNTIME_DIR").Path;
+    if (xdg.empty)
+        xdg = backup;
+    return xdg;
+}
+
+@("shall return the XDG runtime directory")
+unittest {
+    import std.process : environment;
+
+    auto xdg = xdgRuntimeDir;
+    assert(xdg == environment.get("XDG_RUNTIME_DIR"));
 }

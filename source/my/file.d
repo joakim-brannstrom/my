@@ -5,11 +5,12 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.file;
 
-import my.path;
-
 import std.file : mkdirRecurse, exists, copy, dirEntries, SpanMode;
 import std.path : relativePath, buildPath, dirName;
 
+import my.path;
+
+/// Copy `src` into `dst` recursively.
 void copyRecurse(Path src, Path dst) {
     foreach (a; dirEntries(src.toString, SpanMode.depth)) {
         const s = relativePath(a.name, src.toString);
@@ -32,7 +33,7 @@ void setExecutable(Path p) {
 }
 
 /// Check if a file is executable.
-bool isExecutable(Path p) {
+bool isExecutable(Path p) nothrow {
     import core.sys.posix.sys.stat;
     import std.file : getAttributes;
 
@@ -56,6 +57,61 @@ bool isExecutable(Path p) {
     // S_IWOTH     00002   others have write permission
     // S_IXOTH     00001   others have execute permission
 
-    const attrs = getAttributes(p.toString);
-    return (attrs & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0;
+    try {
+        // throws an exception if the file do not exist or is a symlink that
+        // point to something that do not exist.
+        const attrs = getAttributes(p.toString);
+        return (attrs & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0;
+    } catch (Exception e) {
+    }
+
+    return false;
+}
+
+/** As the unix command `which` it searches in `dirs` for an executable `name`.
+ * The only difference in the behavior is that this function returns all
+ * matches.
+ *
+ * Example:
+ * ---
+ * writeln(which([Path("/bin")], "ls"));
+ * ---
+ */
+AbsolutePath[] which(Path[] dirs, string name) {
+    import std.algorithm : map, filter, joiner, copy;
+    import std.array : appender;
+    import std.file : dirEntries, SpanMode;
+    import std.path : baseName;
+
+    auto res = appender!(AbsolutePath[])();
+    dirs.filter!(a => exists(a))
+        .map!(a => dirEntries(a, SpanMode.depth))
+        .joiner
+        .map!(a => Path(a))
+        .filter!(a => isExecutable(a))
+        .filter!(a => a.baseName == name)
+        .map!(a => AbsolutePath(a))
+        .copy(res);
+    return res.data;
+}
+
+@("shall return all locations of ls")
+unittest {
+    assert(which([Path("/bin")], "ls") == [AbsolutePath("/bin/ls")]);
+}
+
+AbsolutePath[] whichFromEnv(string envKey, string name) {
+    import std.algorithm : splitter, map, filter;
+    import std.process : environment;
+    import std.array : empty, array;
+
+    auto dirs = environment.get(envKey, null).splitter(":").filter!(a => !a.empty)
+        .map!(a => Path(a))
+        .array;
+    return which(dirs, name);
+}
+
+@("shall return all locations of ls by using the environment variable PATH")
+unittest {
+    assert(whichFromEnv("PATH", "ls") == [AbsolutePath("/bin/ls")]);
 }

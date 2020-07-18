@@ -69,19 +69,21 @@ bool isExecutable(Path p) nothrow {
 }
 
 /** As the unix command `which` it searches in `dirs` for an executable `name`.
- * The only difference in the behavior is that this function returns all
- * matches.
+ *
+ * The difference in the behavior is that this function returns all
+ * matches and supports globbing (use of `*`).
  *
  * Example:
  * ---
  * writeln(which([Path("/bin")], "ls"));
+ * writeln(which([Path("/bin")], "l*"));
  * ---
  */
 AbsolutePath[] which(Path[] dirs, string name) {
     import std.algorithm : map, filter, joiner, copy;
     import std.array : appender;
     import std.file : dirEntries, SpanMode;
-    import std.path : baseName;
+    import std.path : baseName, globMatch;
 
     auto res = appender!(AbsolutePath[])();
     dirs.filter!(a => exists(a))
@@ -89,7 +91,7 @@ AbsolutePath[] which(Path[] dirs, string name) {
         .joiner
         .map!(a => Path(a))
         .filter!(a => isExecutable(a))
-        .filter!(a => a.baseName == name)
+        .filter!(a => globMatch(a.baseName, name))
         .map!(a => AbsolutePath(a))
         .copy(res);
     return res.data;
@@ -98,6 +100,7 @@ AbsolutePath[] which(Path[] dirs, string name) {
 @("shall return all locations of ls")
 unittest {
     assert(which([Path("/bin")], "ls") == [AbsolutePath("/bin/ls")]);
+    assert(which([Path("/bin")], "l*").length > 1);
 }
 
 AbsolutePath[] whichFromEnv(string envKey, string name) {

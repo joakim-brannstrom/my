@@ -86,7 +86,7 @@ Path xdgRuntimeDir(Path fallback = Path("/tmp")) @safe {
             stat_t st;
             stat(cstr, &st);
             if (st.st_uid == getuid && (st.st_mode & S_IFDIR) != 0
-                    && (st.st_mask & (S_IRWXU | S_IRWXG | S_IRWXO) == S_IRWXU)) {
+                    && ((st.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO)) == S_IRWXU)) {
                 break;
             }
 

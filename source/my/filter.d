@@ -5,6 +5,12 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.filter;
 
+@safe:
+
+version (unittest) {
+    import unit_threaded.assertions;
+}
+
 /** Filter strings by first cutting out a region (include) and then selectively
  * remove (exclude) from that region.
  *
@@ -15,6 +21,8 @@ module my.filter;
  * `getopt`.
  */
 struct ReFilter {
+    import std.regex : Regex, regex, matchFirst;
+
     Regex!char includeRe;
     Regex!char[] excludeRe;
 
@@ -23,7 +31,7 @@ struct ReFilter {
      *
      * Params:
      *  include = regular expression.
-     *  exlucde = regular expression.
+     *  exclude = regular expression.
      */
     this(string include, string[] exclude) {
         includeRe = regex(include, "i");
@@ -45,4 +53,14 @@ struct ReFilter {
 
         return true;
     }
+}
+
+/// Example:
+unittest {
+    import std.algorithm : filter;
+
+    auto r = ReFilter("foo.*", [".*bar.*", ".*batman"]);
+
+    ["foo", "foobar", "foo smurf batman", "batman", "fo", "foo mother"].filter!(
+            a => r.match(a)).shouldEqual(["foo", "foo mother"]);
 }

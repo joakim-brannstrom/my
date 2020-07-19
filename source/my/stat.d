@@ -75,7 +75,7 @@ struct SampleStdDev {
     double value;
 }
 
-SampleStdDev sampleStddev(StatData data, Mean mean) {
+SampleStdDev sampleStdDev(StatData data, Mean mean) {
     const N = cast(double) data.length;
     const s = data.value.map!(a => pow(a - mean.value, 2.0)).sum;
     return SampleStdDev(sqrt(s / (N - 1.0)));
@@ -221,7 +221,7 @@ struct BasicStat {
 
 BasicStat basicStat(StatData data) {
     auto m = mean(data);
-    return BasicStat(m, median(data), sampleStddev(data, m));
+    return BasicStat(m, median(data), sampleStdDev(data, m));
 }
 
 struct NormDistribution {
@@ -306,7 +306,7 @@ in(data.value.length > 1) {
         means ~= bootstrap(data).sum / cast(double) len;
     }
 
-    return StdMeanError(sampleStddev(StatData(means), StatData(means).mean).value);
+    return StdMeanError(sampleStdDev(StatData(means), StatData(means).mean).value);
 }
 
 auto bootstrap(StatData data, long minSamples = 5)

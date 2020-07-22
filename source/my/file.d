@@ -54,6 +54,19 @@ bool getAttrs(const Path file, ref uint attributes) @safe nothrow {
     return status;
 }
 
+/** A `nothrow` version of `setAttributes` in Phobos.
+ */
+bool setAttrs(const Path file, const uint attributes) @safe nothrow {
+    import core.sys.posix.sys.stat : chmod;
+    import std.string : toStringz;
+
+    auto status = () @trusted {
+        auto cfile = toStringz(file);
+        return chmod(cfile, attributes) == 0;
+    }();
+    return status;
+}
+
 /// Returns: true if `file` exists.
 bool exists(const Path file) @safe nothrow {
     uint attrs;
@@ -129,18 +142,21 @@ void copyRecurse(Path src, Path dst) {
         if (!exists(d.dirName)) {
             mkdirRecurse(d.dirName);
         }
-        if (!a.isDir) {
+        if (!existsAnd!isDir(Path(a))) {
             copy(a.name, d);
         }
     }
 }
 
 /// Make a file executable by all users on the system.
-void setExecutable(Path p) {
+void setExecutable(Path p) nothrow {
     import core.sys.posix.sys.stat;
     import std.file : getAttributes, setAttributes;
 
-    setAttributes(p.toString, getAttributes(p.toString) | S_IXUSR | S_IXGRP | S_IXOTH);
+    uint attrs;
+    if (getAttrs(p, attrs)) {
+        setAttrs(p, attrs | S_IXUSR | S_IXGRP | S_IXOTH);
+    }
 }
 
 /// Check if a file is executable.
@@ -148,14 +164,10 @@ bool isExecutable(Path p) nothrow {
     import core.sys.posix.sys.stat;
     import std.file : getAttributes;
 
-    try {
-        // throws an exception if the file do not exist or is a symlink that
-        // point to something that do not exist.
-        const attrs = getAttributes(p.toString);
+    uint attrs;
+    if (getAttrs(p, attrs)) {
         return (attrs & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0;
-    } catch (Exception e) {
     }
-
     return false;
 }
 

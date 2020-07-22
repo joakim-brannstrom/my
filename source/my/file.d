@@ -8,7 +8,118 @@ module my.file;
 import std.file : mkdirRecurse, exists, copy, dirEntries, SpanMode;
 import std.path : relativePath, buildPath, dirName;
 
+public import std.file : attrIsDir, attrIsFile, attrIsSymlink, isFile, isDir, isSymlink;
+
 import my.path;
+
+version (unittest) {
+    import unit_threaded.assertions;
+}
+
+/** A `nothrow` version of `getAttributes` in Phobos.
+ *
+ * man 7 inode search for S_IFMT
+ * S_ISUID     04000   set-user-ID bit
+ * S_ISGID     02000   set-group-ID bit (see below)
+ * S_ISVTX     01000   sticky bit (see below)
+ *
+ * S_IRWXU     00700   owner has read, write, and execute permission
+ * S_IRUSR     00400   owner has read permission
+ * S_IWUSR     00200   owner has write permission
+ * S_IXUSR     00100   owner has execute permission
+ *
+ * S_IRWXG     00070   group has read, write, and execute permission
+ * S_IRGRP     00040   group has read permission
+ * S_IWGRP     00020   group has write permission
+ * S_IXGRP     00010   group has execute permission
+ *
+ * S_IRWXO     00007   others (not in group) have read, write, and execute permission
+ * S_IROTH     00004   others have read permission
+ * S_IWOTH     00002   others have write permission
+ * S_IXOTH     00001   others have execute permission
+ *
+ * The idea of doing it like this is from WebFreaks001 pull request
+ * [DCD pullrequest](https://github.com/dlang-community/dsymbol/pull/151/files).
+ */
+bool getAttrs(const Path file, ref uint attributes) @safe nothrow {
+    import core.sys.posix.sys.stat : lstat, stat_t;
+    import std.string : toStringz;
+
+    stat_t st;
+    auto status = () @trusted {
+        auto cfile = toStringz(file);
+        return lstat(cfile, &st) == 0;
+    }();
+    attributes = st.st_mode;
+    return status;
+}
+
+/// Returns: true if `file` exists.
+bool exists(const Path file) @safe nothrow {
+    uint attrs;
+    return getAttrs(file, attrs);
+}
+
+/** Returns: true if `file` exists and is a file.
+ *
+ * Source: [DCD](https://github.com/dlang-community/dsymbol/blob/master/src/dsymbol/modulecache.d)
+ */
+bool existsAnd(alias pred : isFile)(const Path file) @safe nothrow {
+    uint attrs;
+    if (!getAttrs(file, attrs))
+        return false;
+    return attrIsFile(attrs);
+}
+
+/** Returns: true if `file` exists and is a directory.
+ *
+ * Source: [DCD](https://github.com/dlang-community/dsymbol/blob/master/src/dsymbol/modulecache.d)
+ */
+bool existsAnd(alias pred : isDir)(const Path file) @safe nothrow {
+    uint attrs;
+    if (!getAttrs(file, attrs))
+        return false;
+    return attrIsDir(attrs);
+}
+
+/** Returns: true if `file` exists and is a symlink.
+ *
+ * Source: [DCD](https://github.com/dlang-community/dsymbol/blob/master/src/dsymbol/modulecache.d)
+ */
+bool existsAnd(alias pred : isSymlink)(const Path file) @safe nothrow {
+    uint attrs;
+    if (!getAttrs(file, attrs))
+        return false;
+    return attrIsSymlink(attrs);
+}
+
+/// Example:
+unittest {
+    import std.file : remove, symlink, mkdir;
+    import std.format : format;
+    import std.stdio : File;
+
+    const base = Path(format!"%s_%s"(__FILE__, __LINE__)).baseName;
+    const Path fname = base ~ "_file";
+    const Path dname = base ~ "_dir";
+    const Path symname = base ~ "_symlink";
+    scope (exit)
+        () {
+        foreach (f; [fname, dname, symname]) {
+            if (exists(f))
+                remove(f);
+        }
+    }();
+
+    File(fname, "w").write("foo");
+    mkdir(dname);
+    symlink(fname, symname);
+
+    exists(fname).shouldBeTrue;
+    existsAnd!isFile(fname).shouldBeTrue;
+    existsAnd!isDir(dname).shouldBeTrue;
+    existsAnd!isSymlink(symname).shouldBeTrue;
+}
 
 /// Copy `src` into `dst` recursively.
 void copyRecurse(Path src, Path dst) {
@@ -36,26 +147,6 @@ void setExecutable(Path p) {
 bool isExecutable(Path p) nothrow {
     import core.sys.posix.sys.stat;
     import std.file : getAttributes;
-
-    // man 7 inode search for S_IFMT
-    // S_ISUID     04000   set-user-ID bit
-    // S_ISGID     02000   set-group-ID bit (see below)
-    // S_ISVTX     01000   sticky bit (see below)
-    //
-    // S_IRWXU     00700   owner has read, write, and execute permission
-    // S_IRUSR     00400   owner has read permission
-    // S_IWUSR     00200   owner has write permission
-    // S_IXUSR     00100   owner has execute permission
-    //
-    // S_IRWXG     00070   group has read, write, and execute permission
-    // S_IRGRP     00040   group has read permission
-    // S_IWGRP     00020   group has write permission
-    // S_IXGRP     00010   group has execute permission
-    //
-    // S_IRWXO     00007   others (not in group) have read, write, and execute permission
-    // S_IROTH     00004   others have read permission
-    // S_IWOTH     00002   others have write permission
-    // S_IXOTH     00001   others have execute permission
 
     try {
         // throws an exception if the file do not exist or is a symlink that

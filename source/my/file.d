@@ -40,31 +40,48 @@ version (unittest) {
  *
  * The idea of doing it like this is from WebFreaks001 pull request
  * [DCD pullrequest](https://github.com/dlang-community/dsymbol/pull/151/files).
+ *
+ * Returns: true on success and thus `attributes` contains a valid value.
  */
 bool getAttrs(const Path file, ref uint attributes) @safe nothrow {
-    import core.sys.posix.sys.stat : lstat, stat_t;
-    import std.string : toStringz;
+    import core.sys.posix.sys.stat : stat, stat_t;
+    import my.cstring;
+
+    static bool trustedAttrs(const Path file, ref stat_t st) @trusted {
+        return stat(file.toString.tempCString, &st) == 0;
+    }
 
     stat_t st;
-    auto status = () @trusted {
-        auto cfile = toStringz(file);
-        return lstat(cfile, &st) == 0;
-    }();
+    bool status = trustedAttrs(file, st);
+    attributes = st.st_mode;
+    return status;
+}
+
+/** A `nothrow` version of `getLinkAttributes` in Phobos.
+ *
+ * Returns: true on success and thus `attributes` contains a valid value.
+ */
+bool getLinkAttrs(const Path file, ref uint attributes) @safe nothrow {
+    import core.sys.posix.sys.stat : lstat, stat_t;
+    import my.cstring;
+
+    static bool trustedAttrs(const Path file, ref stat_t st) @trusted {
+        return lstat(file.toString.tempCString, &st) == 0;
+    }
+
+    stat_t st;
+    bool status = trustedAttrs(file, st);
     attributes = st.st_mode;
     return status;
 }
 
 /** A `nothrow` version of `setAttributes` in Phobos.
  */
-bool setAttrs(const Path file, const uint attributes) @safe nothrow {
+bool setAttrs(const Path file, const uint attributes) @trusted nothrow {
     import core.sys.posix.sys.stat : chmod;
-    import std.string : toStringz;
+    import my.cstring;
 
-    auto status = () @trusted {
-        auto cfile = toStringz(file);
-        return chmod(cfile, attributes) == 0;
-    }();
-    return status;
+    return chmod(file.toString.tempCString, attributes) == 0;
 }
 
 /// Returns: true if `file` exists.
@@ -101,7 +118,7 @@ bool existsAnd(alias pred : isDir)(const Path file) @safe nothrow {
  */
 bool existsAnd(alias pred : isSymlink)(const Path file) @safe nothrow {
     uint attrs;
-    if (!getAttrs(file, attrs))
+    if (!getLinkAttrs(file, attrs))
         return false;
     return attrIsSymlink(attrs);
 }

@@ -55,8 +55,13 @@ struct Path {
     alias value this;
 
     ///
-    this(string s) @safe nothrow {
+    this(string s) @safe pure nothrow @nogc {
         value_ = s;
+    }
+
+    /// Copy constructor
+    this(ref return scope Path rhs) @safe pure nothrow @nogc {
+        value_ = rhs.value_;
     }
 
     /// Returns: the underlying `string`.
@@ -93,9 +98,24 @@ struct Path {
     }
 
     ///
+    Path opBinary(string op)(Path rhs) @safe {
+        static if (op == "~") {
+            return Path(buildPath(value_, rhs));
+        } else
+            static assert(false, typeof(this).stringof ~ " does not have operator " ~ op);
+    }
+
+    ///
     void opOpAssign(string op)(string rhs) @safe nothrow {
         static if (op == "~=") {
-            value_ = buildNormalizedPath(value_, rhs);
+            value_ = buldPath(value_, rhs);
+        } else
+            static assert(false, typeof(this).stringof ~ " does not have operator " ~ op);
+    }
+
+    void opOpAssign(string op)(Path rhs) @safe nothrow {
+        static if (op == "~=") {
+            value_ = buildPath(value_, rhs);
         } else
             static assert(false, typeof(this).stringof ~ " does not have operator " ~ op);
     }
@@ -147,11 +167,6 @@ struct AbsolutePath {
     alias value this;
 
     ///
-    this(AbsolutePath p) @safe pure nothrow @nogc {
-        value_ = p.value_;
-    }
-
-    ///
     this(string p) @safe {
         this(Path(p));
     }
@@ -159,6 +174,11 @@ struct AbsolutePath {
     ///
     this(Path p) @safe {
         value_ = Path(p.value_.expandTilde.absolutePath.buildNormalizedPath);
+    }
+
+    /// Copy constructor
+    this(ref return scope AbsolutePath rhs) @safe pure nothrow @nogc {
+        value_ = rhs.value_;
     }
 
     /// Returns: the underlying `Path`.

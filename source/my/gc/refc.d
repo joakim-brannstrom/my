@@ -64,6 +64,10 @@ struct RefCounted(T) {
     }
 
     ~this() {
+        release;
+    }
+
+    void release() {
         if (_impl) {
             assert(_impl._count >= 0, "Invalid count detected");
             import core.atomic;

@@ -50,11 +50,6 @@ struct RefCounted(T) {
         shared int _count = 1;
     }
 
-    ref T _get() {
-        assert(_impl, "Invalid refcounted access");
-        return _impl.item;
-    }
-
     this(this) {
         if (_impl) {
             import core.atomic;
@@ -67,6 +62,24 @@ struct RefCounted(T) {
         release;
     }
 
+    ref T get() {
+        assert(_impl, "Invalid refcounted access");
+        return _impl.item;
+    }
+
+    void opAssign(RefCounted other) {
+        import std.algorithm : swap;
+
+        swap(_impl, other._impl);
+    }
+
+    void opAssign(T other) {
+        import std.algorithm : move;
+
+        move(other, _impl.item);
+    }
+
+    /// Release the reference.
     void release() {
         if (_impl) {
             assert(_impl._count >= 0, "Invalid count detected");
@@ -82,19 +95,17 @@ struct RefCounted(T) {
         }
     }
 
-    void opAssign(RefCounted other) {
-        import std.algorithm : swap;
+    /// The number of references.
+    int refCount() {
+        import core.atomic : atomicLoad;
 
-        swap(_impl, other._impl);
+        if (_impl) {
+            return atomicLoad(_impl._count);
+        }
+        return 0;
     }
 
-    void opAssign(T other) {
-        import std.algorithm : move;
-
-        move(other, _impl.item);
-    }
-
-    alias _get this;
+    alias get this;
 
 private:
     private Impl* _impl;
@@ -120,6 +131,9 @@ RefCounted!T refCounted(T)(auto ref T item) {
         auto destroyme = S(1).refCounted;
         auto dm2 = destroyme;
         auto dm3 = destroyme;
+        assert(destroyme.refCount == 3);
+        assert(dm2.refCount == 3);
+        assert(dm3.refCount == 3);
     }
 
     assert(dtorcalled == 1);

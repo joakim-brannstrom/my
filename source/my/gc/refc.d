@@ -62,7 +62,7 @@ struct RefCounted(T) {
         release;
     }
 
-    ref T get() {
+    ref inout(T) get() inout {
         assert(_impl, "Invalid refcounted access");
         return _impl.item;
     }

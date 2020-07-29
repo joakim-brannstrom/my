@@ -50,11 +50,6 @@ struct RefCounted(T) {
         shared int _count = 1;
     }
 
-    ref T _get() {
-        assert(_impl, "Invalid refcounted access");
-        return _impl.item;
-    }
-
     this(this) {
         if (_impl) {
             import core.atomic;
@@ -64,18 +59,12 @@ struct RefCounted(T) {
     }
 
     ~this() {
-        if (_impl) {
-            assert(_impl._count >= 0, "Invalid count detected");
-            import core.atomic;
+        release;
+    }
 
-            if (_impl._count.atomicOp!"-="(1) == 0) {
-                destroy(_impl.item);
-                import core.memory : GC;
-
-                () @trusted { GC.removeRoot(_impl); }();
-            }
-            _impl = null;
-        }
+    ref T get() {
+        assert(_impl, "Invalid refcounted access");
+        return _impl.item;
     }
 
     void opAssign(RefCounted other) {
@@ -90,7 +79,33 @@ struct RefCounted(T) {
         move(other, _impl.item);
     }
 
-    alias _get this;
+    /// Release the reference.
+    void release() {
+        if (_impl) {
+            assert(_impl._count >= 0, "Invalid count detected");
+            import core.atomic;
+
+            if (_impl._count.atomicOp!"-="(1) == 0) {
+                destroy(_impl.item);
+                import core.memory : GC;
+
+                () @trusted { GC.removeRoot(_impl); }();
+            }
+            _impl = null;
+        }
+    }
+
+    /// The number of references.
+    int refCount() @safe pure nothrow const @nogc {
+        import core.atomic : atomicLoad;
+
+        if (_impl) {
+            return atomicLoad(_impl._count);
+        }
+        return 0;
+    }
+
+    alias get this;
 
 private:
     private Impl* _impl;
@@ -116,6 +131,9 @@ RefCounted!T refCounted(T)(auto ref T item) {
         auto destroyme = S(1).refCounted;
         auto dm2 = destroyme;
         auto dm3 = destroyme;
+        assert(destroyme.refCount == 3);
+        assert(dm2.refCount == 3);
+        assert(dm3.refCount == 3);
     }
 
     assert(dtorcalled == 1);

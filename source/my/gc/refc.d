@@ -96,7 +96,7 @@ struct RefCounted(T) {
     }
 
     /// The number of references.
-    int refCount() {
+    int refCount() @safe pure nothrow const @nogc {
         import core.atomic : atomicLoad;
 
         if (_impl) {

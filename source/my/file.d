@@ -5,6 +5,7 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.file;
 
+import std.algorithm : canFind;
 import std.file : mkdirRecurse, exists, copy, dirEntries, SpanMode;
 import std.path : relativePath, buildPath, dirName;
 
@@ -207,7 +208,7 @@ AbsolutePath[] which(Path[] dirs, string name) {
 
     auto res = appender!(AbsolutePath[])();
     dirs.filter!(a => exists(a))
-        .map!(a => dirEntries(a, SpanMode.depth))
+        .map!(a => dirEntries(a, SpanMode.shallow))
         .joiner
         .map!(a => Path(a))
         .filter!(a => isExecutable(a))
@@ -219,7 +220,7 @@ AbsolutePath[] which(Path[] dirs, string name) {
 
 @("shall return all locations of ls")
 unittest {
-    assert(which([Path("/bin")], "ls") == [AbsolutePath("/bin/ls")]);
+    assert(which([Path("/bin")], "yes") == [AbsolutePath("/bin/yes")]);
     assert(which([Path("/bin")], "l*").length > 1);
 }
 
@@ -236,5 +237,5 @@ AbsolutePath[] whichFromEnv(string envKey, string name) {
 
 @("shall return all locations of ls by using the environment variable PATH")
 unittest {
-    assert(whichFromEnv("PATH", "ls") == [AbsolutePath("/bin/ls")]);
+    assert(canFind(whichFromEnv("PATH", "yes"), AbsolutePath("/bin/yes")));
 }

@@ -220,8 +220,8 @@ AbsolutePath[] which(Path[] dirs, string name) {
 
 @("shall return all locations of ls")
 unittest {
-    assert(which([Path("/bin")], "yes") == [AbsolutePath("/bin/yes")]);
-    assert(which([Path("/bin")], "l*").length > 1);
+    which([Path("/bin")], "mv").shouldEqual([AbsolutePath("/bin/mv")]);
+    which([Path("/bin")], "l*").length.shouldBeGreaterThan(1);
 }
 
 AbsolutePath[] whichFromEnv(string envKey, string name) {
@@ -237,5 +237,5 @@ AbsolutePath[] whichFromEnv(string envKey, string name) {
 
 @("shall return all locations of ls by using the environment variable PATH")
 unittest {
-    assert(canFind(whichFromEnv("PATH", "yes"), AbsolutePath("/bin/yes")));
+    canFind(whichFromEnv("PATH", "mv"), AbsolutePath("/bin/mv")).shouldBeTrue;
 }

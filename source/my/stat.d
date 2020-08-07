@@ -100,8 +100,8 @@ struct Histogram {
     double interval;
 
     this(double low, double high, long nrBuckets)
-    in(nrBuckets > 1, "failed nrBuckets > 1")
-    in(low < high, "failed low < high") {
+    in (nrBuckets > 1, "failed nrBuckets > 1")
+    in (low < high, "failed low < high") {
         this.low = low;
         this.high = high;
         interval = (high - low) / cast(double) nrBuckets;
@@ -109,7 +109,7 @@ struct Histogram {
     }
 
     void put(const double v)
-    in(v >= low && v <= high, "v must be in the range [low, high]") {
+    in (v >= low && v <= high, "v must be in the range [low, high]") {
         const idx = cast(long) floor((v - low) / interval);
         assert(idx >= 0);
 
@@ -281,7 +281,7 @@ NormalDistributionPdf pdf(NormDistribution nd) {
 }
 
 double cdf(NormDistribution nd, double x)
-in(nd.sd > 0, "domain error") {
+in (nd.sd > 0, "domain error") {
     if (isInfinity(x)) {
         if (x < 0)
             return 0;
@@ -298,7 +298,7 @@ struct StdMeanError {
 }
 
 StdMeanError stdError(StatData data)
-in(data.value.length > 1) {
+in (data.value.length > 1) {
     const len = data.value.length;
     double[] means;
     long samples = max(30, data.value.length);
@@ -310,8 +310,8 @@ in(data.value.length > 1) {
 }
 
 auto bootstrap(StatData data, long minSamples = 5)
-in(minSamples > 0)
-in(data.value.length > 1) {
+in (minSamples > 0)
+in (data.value.length > 1) {
     const len = data.value.length;
     return iota(min(minSamples, len)).map!(a => uniform(0, len - 1))
         .map!(a => data.value[a]);

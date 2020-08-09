@@ -6,6 +6,11 @@ license "BSL-1.0"
 
 dependency "sumtype" version="~>0.9.4" optional=false default=true
 
+// if you are on a closed network with no internet access you can use the local
+// copy of sumtype instead by uncommenting the following two lines
+//subPackage "./vendor/sumtype"
+//dependency "my:sumtype" version="*"
+
 targetPath "build"
 
 dflags "-verrors=context"

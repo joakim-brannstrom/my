@@ -7,9 +7,9 @@ license "BSL-1.0"
 dependency "sumtype" version="~>0.9.4" optional=false default=true
 
 // if you are on a closed network with no internet access you can use the local
-// copy of sumtype instead by uncommenting the following two lines
-//subPackage "./vendor/sumtype"
-//dependency "my:sumtype" version="*"
+// copy of sumtype and unit-threaded by adding them as local packages.
+// dub add-local vendor/sumtype 0.9.4
+// dub add-local vendor/unit-threaded 1.0.4
 
 targetPath "build"
 
@@ -20,12 +20,12 @@ configuration "library" {
 }
 
 configuration "unittest" {
-    //dflags "-checkaction=context"
+    dependency "unit-threaded" version="~>1.0.4" optional=true
 
-    dependency "unit-threaded" version="~>1.0.4"
     targetType "executable"
     targetName "unittest"
     mainSourceFile "build/ut.d"
-    preBuildCommands "dub run unit-threaded -c gen_ut_main -- -f build/ut.d"
     excludedSourceFiles "source/app.d"
+
+    preBuildCommands "dub run unit-threaded -c gen_ut_main -- -f build/ut.d"
 }

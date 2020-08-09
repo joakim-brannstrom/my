@@ -13,6 +13,13 @@ import std.datetime : SysTime, Clock, dur;
 
 import my.gc.refc;
 
+/// Returns: a started instance of MemFree.
+RefCounted!MemFree memFree() @safe {
+    MemFree inst;
+    inst.start;
+    return RefCounted!MemFree(inst);
+}
+
 /** Reduces the used memory by the GC and free the heap to the OS.
  *
  * To avoid calling this too often the struct have a timer to ensure it is
@@ -22,23 +29,17 @@ import my.gc.refc;
  */
 struct MemFree {
     private {
-        static struct Data {
-            bool isRunning;
-            Tid bg;
-        }
-
-        RefCounted!Data data;
+        bool isRunning;
+        Tid bg;
     }
 
     ~this() @trusted {
-        if (data.empty)
-            return;
-        if (!data.isRunning)
+        if (!isRunning)
             return;
 
         scope (exit)
-            data.isRunning = false;
-        send(data.bg, Msg.stop);
+            isRunning = false;
+        send(bg, Msg.stop);
     }
 
     /** Start a background thread to do the work.
@@ -46,11 +47,8 @@ struct MemFree {
      * It terminates when the destructor is called.
      */
     void start() @trusted {
-        data = Data.init;
-
-        scope (success)
-            data.isRunning = true;
-        data.bg = spawn(&tick);
+        bg = spawn(&tick);
+        isRunning = true;
     }
 
 }

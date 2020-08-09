@@ -226,9 +226,21 @@ struct FileWatch {
         return watch(Path(p));
     }
 
-    /// Recursively add the path and all its subdirectories and files to be watched.
-    /// Returns: paths that failed to be added
-    AbsolutePath[] watchRecurse(Path root, uint events = DefaultEvents) {
+    private static bool allFiles(string p) {
+        return true;
+    }
+
+    /** Recursively add the path and all its subdirectories and files to be watched.
+     *
+     * Params:
+     *  pred = only those files and directories that `pred` returns true for are watched, by default every file/directory.
+     *  root = directory to watch together with its content and subdirectories.
+     *  events = events to watch for. See man inotify and core.sys.linux.sys.inotify.
+     *
+     * Returns: paths that failed to be added.
+     */
+    AbsolutePath[] watchRecurse(alias pred = allFiles)(Path root, uint events = DefaultEvents) {
+        import std.algorithm : filter;
         import my.file : existsAnd;
 
         auto app = appender!(AbsolutePath[])();
@@ -238,7 +250,7 @@ struct FileWatch {
         }
 
         if (existsAnd!isDir(root)) {
-            foreach (p; dirEntries(root, SpanMode.depth)) {
+            foreach (p; dirEntries(root, SpanMode.depth).filter!(a => pred(a.name))) {
                 if (!watch(Path(p.name), events)) {
                     app.put(AbsolutePath(p.name));
                 }
@@ -249,8 +261,8 @@ struct FileWatch {
     }
 
     ///
-    AbsolutePath[] watchRecurse(string root, uint events = DefaultEvents) {
-        return watchRecurse(Path(root), events);
+    AbsolutePath[] watchRecurse(alias pred = allFiles)(string root, uint events = DefaultEvents) {
+        return watchRecurse!pred(Path(root), events);
     }
 
     /// Returns: the events that has occured to the watched paths.

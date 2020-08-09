@@ -59,11 +59,6 @@ struct Path {
         value_ = s;
     }
 
-    /// Copy constructor
-    this(ref return scope Path rhs) @safe pure nothrow @nogc {
-        value_ = rhs.value_;
-    }
-
     /// Returns: the underlying `string`.
     string value() @safe pure nothrow const @nogc {
         return value_;
@@ -174,11 +169,6 @@ struct AbsolutePath {
     ///
     this(Path p) @safe {
         value_ = Path(p.value_.expandTilde.absolutePath.buildNormalizedPath);
-    }
-
-    /// Copy constructor
-    this(ref return scope AbsolutePath rhs) @safe pure nothrow @nogc {
-        value_ = rhs.value_;
     }
 
     /// Returns: the underlying `Path`.

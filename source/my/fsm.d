@@ -8,10 +8,6 @@ module my.fsm;
 
 import std.format : format;
 
-version (unittest) {
-    import unit_threaded.assertions;
-}
-
 /** A state machine derived from the types it is based on.
  *
  * Each state have its unique data that it works on.
@@ -108,7 +104,7 @@ unittest {
         fsm.act!((A a) {}, (ref B a) { a.x++; }, (C a) {});
     }
 
-    global.x.shouldEqual(1);
+    assert(global.x == 1);
 }
 
 /** Hold a mapping between a Type and data.

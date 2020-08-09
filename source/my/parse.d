@@ -7,10 +7,6 @@ module my.parse;
 
 import core.time : Duration, dur;
 
-version (unittest) {
-    import unit_threaded.assertions;
-}
-
 class TimeParseException : Exception {
     this(string msg) @safe {
         super(msg);
@@ -69,5 +65,5 @@ unittest {
     const expected = 1.dur!"weeks" + 1.dur!"days" + 3.dur!"hours"
         + 2.dur!"minutes" + 5.dur!"seconds" + 9.dur!"msecs";
     const d = parseDuration("1 weeks 1 days 3 hours 2 minutes 5 seconds 9 msecs");
-    d.should == expected;
+    assert(d == expected);
 }

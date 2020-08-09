@@ -255,19 +255,17 @@ struct AbsolutePath {
 unittest {
     import std.algorithm : canFind;
     import std.path;
-    import unit_threaded;
 
-    AbsolutePath(Path("~/foo")).toString.canFind('~').shouldEqual(false);
-    AbsolutePath(Path("foo")).toString.isAbsolute.shouldEqual(true);
+    assert(!AbsolutePath(Path("~/foo")).toString.canFind('~'));
+    assert(AbsolutePath(Path("foo")).toString.isAbsolute);
 }
 
 @("shall expand . without any trailing /.")
 unittest {
     import std.algorithm : canFind;
-    import unit_threaded;
 
-    AbsolutePath(Path(".")).toString.canFind('.').shouldBeFalse;
-    AbsolutePath(Path(".")).toString.canFind('.').shouldBeFalse;
+    assert(!AbsolutePath(Path(".")).toString.canFind('.'));
+    assert(!AbsolutePath(Path(".")).toString.canFind('.'));
 }
 
 @("shall create a compile time Path")

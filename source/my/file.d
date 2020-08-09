@@ -13,10 +13,6 @@ public import std.file : attrIsDir, attrIsFile, attrIsSymlink, isFile, isDir, is
 
 import my.path;
 
-version (unittest) {
-    import unit_threaded.assertions;
-}
-
 /** A `nothrow` version of `getAttributes` in Phobos.
  *
  * man 7 inode search for S_IFMT
@@ -146,10 +142,10 @@ unittest {
     mkdir(dname);
     symlink(fname, symname);
 
-    exists(fname).shouldBeTrue;
-    existsAnd!isFile(fname).shouldBeTrue;
-    existsAnd!isDir(dname).shouldBeTrue;
-    existsAnd!isSymlink(symname).shouldBeTrue;
+    assert(exists(fname));
+    assert(existsAnd!isFile(fname));
+    assert(existsAnd!isDir(dname));
+    assert(existsAnd!isSymlink(symname));
 }
 
 /// Copy `src` into `dst` recursively.
@@ -220,8 +216,8 @@ AbsolutePath[] which(Path[] dirs, string name) {
 
 @("shall return all locations of ls")
 unittest {
-    which([Path("/bin")], "mv").shouldEqual([AbsolutePath("/bin/mv")]);
-    which([Path("/bin")], "l*").length.shouldBeGreaterThan(1);
+    assert(which([Path("/bin")], "mv") == [AbsolutePath("/bin/mv")]);
+    assert(which([Path("/bin")], "l*").length >= 1);
 }
 
 AbsolutePath[] whichFromEnv(string envKey, string name) {
@@ -237,5 +233,5 @@ AbsolutePath[] whichFromEnv(string envKey, string name) {
 
 @("shall return all locations of ls by using the environment variable PATH")
 unittest {
-    canFind(whichFromEnv("PATH", "mv"), AbsolutePath("/bin/mv")).shouldBeTrue;
+    assert(canFind(whichFromEnv("PATH", "mv"), AbsolutePath("/bin/mv")));
 }

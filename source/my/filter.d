@@ -7,10 +7,6 @@ module my.filter;
 
 @safe:
 
-version (unittest) {
-    import unit_threaded.assertions;
-}
-
 /** Filter strings by first cutting out a region (include) and then selectively
  * remove (exclude) from that region.
  *
@@ -58,9 +54,12 @@ struct ReFilter {
 /// Example:
 unittest {
     import std.algorithm : filter;
+    import std.array : array;
 
     auto r = ReFilter("foo.*", [".*bar.*", ".*batman"]);
 
-    ["foo", "foobar", "foo smurf batman", "batman", "fo", "foo mother"].filter!(
-            a => r.match(a)).shouldEqual(["foo", "foo mother"]);
+    assert(["foo", "foobar", "foo smurf batman", "batman", "fo",
+            "foo mother"].filter!(a => r.match(a)).array == [
+            "foo", "foo mother"
+            ]);
 }

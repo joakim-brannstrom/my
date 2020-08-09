@@ -9,23 +9,17 @@ dependency "sumtype" version="~>0.9.4" optional=false default=true
 // if you are on a closed network with no internet access you can use the local
 // copy of sumtype and unit-threaded by adding them as local packages.
 // dub add-local vendor/sumtype 0.9.4
-// dub add-local vendor/unit-threaded 1.0.4
+// dub add-local vendor/silly 1.0.2
 
 targetPath "build"
 
 dflags "-verrors=context"
+//dflags "-checkaction=context"
 
 configuration "library" {
     targetType "library"
 }
 
 configuration "unittest" {
-    dependency "unit-threaded" version="~>1.0.4" optional=true
-
-    targetType "executable"
-    targetName "unittest"
-    mainSourceFile "build/ut.d"
-    excludedSourceFiles "source/app.d"
-
-    preBuildCommands "dub run unit-threaded -c gen_ut_main -- -f build/ut.d"
+    dependency "silly" version="~>1.0.2"
 }

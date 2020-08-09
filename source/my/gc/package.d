@@ -11,6 +11,8 @@ module my.gc;
 import std.concurrency : send, spawn, receiveTimeout, Tid;
 import std.datetime : SysTime, Clock, dur;
 
+import my.gc.refc;
+
 /** Reduces the used memory by the GC and free the heap to the OS.
  *
  * To avoid calling this too often the struct have a timer to ensure it is
@@ -20,16 +22,23 @@ import std.datetime : SysTime, Clock, dur;
  */
 struct MemFree {
     private {
-        bool isRunning;
-        Tid bg;
+        static struct Data {
+            bool isRunning;
+            Tid bg;
+        }
+
+        RefCounted!Data data;
     }
 
     ~this() @trusted {
-        if (!isRunning)
+        if (data.empty)
             return;
+        if (!data.isRunning)
+            return;
+
         scope (exit)
-            isRunning = false;
-        send(bg, Msg.stop);
+            data.isRunning = false;
+        send(data.bg, Msg.stop);
     }
 
     /** Start a background thread to do the work.
@@ -37,9 +46,11 @@ struct MemFree {
      * It terminates when the destructor is called.
      */
     void start() @trusted {
+        data = Data.init;
+
         scope (success)
-            isRunning = true;
-        bg = spawn(&tick);
+            data.isRunning = true;
+        data.bg = spawn(&tick);
     }
 
 }

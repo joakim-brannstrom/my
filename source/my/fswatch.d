@@ -272,7 +272,7 @@ struct FileWatch {
      * Returns: the events that has occured to the watched paths.
      */
     FileChangeEvent[] getEvents(Duration timeout = Duration.zero) {
-        import std.algorithm : max;
+        import std.algorithm : min;
 
         FileChangeEvent[] events;
         if (!fd)
@@ -281,7 +281,7 @@ struct FileWatch {
         pollfd pfd;
         pfd.fd = fd;
         pfd.events = POLLIN;
-        const code = poll(&pfd, 1, cast(int) max(int.max, timeout.total!"msecs"));
+        const code = poll(&pfd, 1, cast(int) min(int.max, timeout.total!"msecs"));
 
         if (code < 0) {
             throw new Exception("Failed to poll events. Error code " ~ errno.to!string);

@@ -46,7 +46,7 @@ import core.sys.linux.unistd : close, read;
 import core.sys.posix.poll : pollfd, poll, POLLIN, POLLNVAL;
 import core.thread : Thread;
 import core.time : dur, Duration;
-import std.array : appender;
+import std.array : appender, empty;
 import std.conv : to;
 import std.file : DirEntry, isDir, dirEntries, rmdirRecurse, write, append,
     rename, remove, exists, SpanMode, mkdir, rmdir;
@@ -241,6 +241,7 @@ struct FileWatch {
     AbsolutePath[] watchRecurse(alias pred = allFiles)(Path root, uint events = DefaultEvents) {
         import std.algorithm : filter;
         import my.file : existsAnd;
+        import my.set;
 
         auto app = appender!(AbsolutePath[])();
 
@@ -249,6 +250,27 @@ struct FileWatch {
         }
 
         if (existsAnd!isDir(root)) {
+            auto dirs = [AbsolutePath(root)];
+            Set!AbsolutePath visited;
+            while (!dirs.empty) {
+                auto front = dirs[0];
+                dirs = dirs[1..$];
+                if (front in visited)
+                    continue;
+                visited.add(front);
+
+                try {
+                    foreach (p; dirEntries(front, SpanMode.shallow).filter!(a => pred(a.name))) {
+                        if (!watch(Path(p.name), events)) {
+                            app.put(AbsolutePath(p.name));
+                        }
+                        if (existsAnd!isDir(front))
+                            dirs ~= AbsolutePath(p.name);
+                    }
+                } catch(Exception e) {
+                    app.put(AbsolutePath(front));
+                }
+            }
             foreach (p; dirEntries(root, SpanMode.depth).filter!(a => pred(a.name))) {
                 if (!watch(Path(p.name), events)) {
                     app.put(AbsolutePath(p.name));

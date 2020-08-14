@@ -46,10 +46,10 @@ import core.sys.linux.unistd : close, read;
 import core.sys.posix.poll : pollfd, poll, POLLIN, POLLNVAL;
 import core.thread : Thread;
 import core.time : dur, Duration;
+import logger = std.experimental.logger;
 import std.array : appender, empty;
 import std.conv : to;
-import std.file : DirEntry, isDir, dirEntries, rmdirRecurse, write, append,
-    rename, remove, exists, SpanMode, mkdir, rmdir;
+import std.file : DirEntry, isDir, dirEntries, rmdirRecurse, write, append, rename, remove, exists, SpanMode, mkdir, rmdir;
 import std.path : buildPath;
 import std.range : isInputRange;
 import std.string : toStringz, fromStringz;
@@ -164,8 +164,11 @@ auto fileWatch() {
 }
 
 /// Listens for create/modify/removal of files and directories.
-enum DefaultEvents = IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MODIFY | IN_MOVE_SELF
-    | IN_MOVED_FROM | IN_MOVED_TO | IN_ATTRIB | IN_EXCL_UNLINK | IN_CLOSE_WRITE;
+enum ContentEvents = IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MODIFY
+    | IN_MOVE_SELF | IN_MOVED_FROM | IN_MOVED_TO | IN_EXCL_UNLINK | IN_CLOSE_WRITE;
+
+/// Listen for events that change the metadata.
+enum MetadataEvents = IN_ACCESS | IN_ATTRIB | IN_OPEN | IN_CLOSE_NOWRITE | IN_EXCL_UNLINK;
 
 /** An instance of a FileWatcher
  */
@@ -207,7 +210,7 @@ struct FileWatch {
      *
      * Returns: true if the path was successfully added.
      */
-    bool watch(Path path, uint events = DefaultEvents) {
+    bool watch(Path path, uint events = ContentEvents) {
         const wd = inotify_add_watch(fd, path.toStringz, events);
         if (wd != -1) {
             const fc = fcntl(fd, F_SETFD, FD_CLOEXEC);
@@ -221,7 +224,7 @@ struct FileWatch {
     }
 
     ///
-    bool watch(string p, uint events = DefaultEvents) {
+    bool watch(string p, uint events = ContentEvents) {
         return watch(Path(p));
     }
 
@@ -238,51 +241,53 @@ struct FileWatch {
      *
      * Returns: paths that failed to be added.
      */
-    AbsolutePath[] watchRecurse(alias pred = allFiles)(Path root, uint events = DefaultEvents) {
+    AbsolutePath[] watchRecurse(alias pred = allFiles)(Path root, uint events = ContentEvents) {
         import std.algorithm : filter;
         import my.file : existsAnd;
         import my.set;
 
-        auto app = appender!(AbsolutePath[])();
+        auto failed = appender!(AbsolutePath[])();
 
         if (!watch(root, events)) {
-            app.put(AbsolutePath(root));
+            failed.put(AbsolutePath(root));
         }
 
-        if (existsAnd!isDir(root)) {
-            auto dirs = [AbsolutePath(root)];
-            Set!AbsolutePath visited;
-            while (!dirs.empty) {
-                auto front = dirs[0];
-                dirs = dirs[1..$];
-                if (front in visited)
-                    continue;
-                visited.add(front);
+        if (!existsAnd!isDir(root)) {
+            return failed.data;
+        }
 
-                try {
-                    foreach (p; dirEntries(front, SpanMode.shallow).filter!(a => pred(a.name))) {
-                        if (!watch(Path(p.name), events)) {
-                            app.put(AbsolutePath(p.name));
-                        }
-                        if (existsAnd!isDir(front))
-                            dirs ~= AbsolutePath(p.name);
+        auto dirs = [AbsolutePath(root)];
+        Set!AbsolutePath visited;
+        while (!dirs.empty) {
+            auto front = dirs[0];
+            dirs = dirs[1 .. $];
+            if (front in visited)
+                continue;
+            visited.add(front);
+
+            try {
+                foreach (p; dirEntries(front, SpanMode.shallow).filter!(a => pred(a.name))) {
+                    if (!watch(Path(p.name), events)) {
+                        failed.put(AbsolutePath(p.name));
                     }
-                } catch(Exception e) {
-                    app.put(AbsolutePath(front));
+                    if (existsAnd!isDir(Path(p.name))) {
+                        dirs ~= AbsolutePath(p.name);
+                    }
                 }
-            }
-            foreach (p; dirEntries(root, SpanMode.depth).filter!(a => pred(a.name))) {
-                if (!watch(Path(p.name), events)) {
-                    app.put(AbsolutePath(p.name));
-                }
+            } catch (Exception e) {
+                () @trusted {
+                logger.trace(e);
+                }();
+                logger.trace(e.msg);
+                failed.put(AbsolutePath(front));
             }
         }
 
-        return app.data;
+        return failed.data;
     }
 
     ///
-    AbsolutePath[] watchRecurse(alias pred = allFiles)(string root, uint events = DefaultEvents) {
+    AbsolutePath[] watchRecurse(alias pred = allFiles)(string root, uint events = ContentEvents) {
         return watchRecurse!pred(Path(root), events);
     }
 

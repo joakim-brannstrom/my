@@ -49,7 +49,8 @@ import core.time : dur, Duration;
 import logger = std.experimental.logger;
 import std.array : appender, empty;
 import std.conv : to;
-import std.file : DirEntry, isDir, dirEntries, rmdirRecurse, write, append, rename, remove, exists, SpanMode, mkdir, rmdir;
+import std.file : DirEntry, isDir, dirEntries, rmdirRecurse, write, append,
+    rename, remove, exists, SpanMode, mkdir, rmdir;
 import std.path : buildPath;
 import std.range : isInputRange;
 import std.string : toStringz, fromStringz;
@@ -275,9 +276,7 @@ struct FileWatch {
                     }
                 }
             } catch (Exception e) {
-                () @trusted {
-                logger.trace(e);
-                }();
+                () @trusted { logger.trace(e); }();
                 logger.trace(e.msg);
                 failed.put(AbsolutePath(front));
             }
@@ -591,4 +590,116 @@ unittest {
             assert(x.path == AbsolutePath("test2"));
             return true;
         }));
+}
+
+struct MonitorResult {
+    enum Kind {
+        Access,
+        Attribute,
+        CloseWrite,
+        CloseNoWrite,
+        Create,
+        Delete,
+        DeleteSelf,
+        Modify,
+        MoveSelf,
+        Rename,
+        Open,
+    }
+
+    Kind kind;
+    AbsolutePath path;
+}
+
+/** Monitor root's for filesystem changes which create/remove/modify
+ * files/directories.
+ */
+struct Monitor {
+    import std.array : appender;
+    import std.file : isDir;
+    import std.utf : UTFException;
+    import my.fswatch;
+    import my.filter : GlobFilter;
+    import sumtype;
+
+    private {
+        AbsolutePath[] roots;
+        FileWatch fw;
+        GlobFilter fileFilter;
+        uint events;
+    }
+
+    /**
+     * Params:
+     *  roots = directories to recursively monitor
+     */
+    this(AbsolutePath[] roots, GlobFilter fileFilter, uint events = ContentEvents) {
+        this.roots = roots;
+        this.fileFilter = fileFilter;
+        this.events = events;
+
+        auto app = appender!(AbsolutePath[])();
+        fw = fileWatch();
+        foreach (r; roots) {
+            app.put(fw.watchRecurse(r, events));
+        }
+
+        logger.trace(!app.data.empty, "unable to watch ", app.data);
+    }
+
+    MonitorResult[] wait(Duration timeout) {
+        import std.array : array;
+        import std.algorithm : canFind, startsWith, filter;
+
+        auto rval = appender!(MonitorResult[])();
+        try {
+            foreach (e; fw.getEvents(timeout)) {
+                e.match!((Event.Access x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.Access, x.path));
+                }, (Event.Attribute x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.Attribute, x.path));
+                }, (Event.CloseWrite x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.CloseWrite, x.path));
+                }, (Event.CloseNoWrite x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.CloseNoWrite, x.path));
+                }, (Event.Create x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.Create, x.path));
+                    fw.watchRecurse(x.path, events);
+                }, (Event.Modify x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.Modify, x.path));
+                }, (Event.MoveSelf x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.MoveSelf, x.path));
+                    if (canFind!((a, b) => b.toString.startsWith(a.toString) != 0)(roots, x.path)) {
+                        fw.watchRecurse(x.path, events);
+                    }
+                }, (Event.Delete x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.Delete, x.path));
+                }, (Event.DeleteSelf x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.DeleteSelf, x.path));
+                }, (Event.Rename x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.Rename, x.to));
+                }, (Event.Open x) {
+                    rval.put(MonitorResult(MonitorResult.Kind.Open, x.path));
+                },);
+            }
+        } catch (Exception e) {
+            logger.trace(e.msg);
+        }
+
+        return rval.data.filter!(a => fileFilter.match(a.path)).array;
+    }
+
+    /// Clear the event listener of any residual events.
+    void clear() {
+        foreach (e; fw.getEvents(Duration.zero)) {
+            e.match!((Event.Access x) {}, (Event.Attribute x) {}, (Event.CloseWrite x) {
+            }, (Event.CloseNoWrite x) {}, (Event.Create x) {
+                // add any new files/directories to be listened on
+                fw.watchRecurse(x.path, events);
+            }, (Event.Modify x) {}, (Event.MoveSelf x) {}, (Event.Delete x) {}, (Event.DeleteSelf x) {
+            }, (Event.Rename x) {}, (Event.Open x) {},);
+        }
+
+        fw.getEvents;
+    }
 }

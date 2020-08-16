@@ -13,7 +13,8 @@ dependency "sumtype" version="~>0.9.4" optional=false default=true
 
 targetPath "build"
 
-dflags "-verrors=context"
+dflags "-verrors=context" platform="dmd"
+dflags "--verrors-context" platform="ldc"
 //dflags "-checkaction=context"
 
 configuration "library" {

@@ -54,6 +54,7 @@ import std.file : DirEntry, isDir, dirEntries, rmdirRecurse, write, append,
 import std.path : buildPath;
 import std.range : isInputRange;
 import std.string : toStringz, fromStringz;
+import std.exception : collectException;
 
 import sumtype;
 
@@ -645,10 +646,29 @@ struct Monitor {
         auto app = appender!(AbsolutePath[])();
         fw = fileWatch();
         foreach (r; roots) {
-            app.put(fw.watchRecurse(r, events));
+            app.put(fw.watchRecurse(r, events, (a) {
+                    return isInteresting(fileFilter, a);
+                }));
         }
 
         logger.trace(!app.data.empty, "unable to watch ", app.data);
+    }
+
+    static bool isInteresting(GlobFilter fileFilter, string p) nothrow {
+        import my.file;
+
+        try {
+            const ap = AbsolutePath(p);
+
+            if (existsAnd!isDir(ap)) {
+                return true;
+            }
+            return fileFilter.match(ap);
+        } catch (Exception e) {
+            collectException(logger.trace(e.msg));
+        }
+
+        return false;
     }
 
     MonitorResult[] wait(Duration timeout) {
@@ -668,13 +688,13 @@ struct Monitor {
                     rval.put(MonitorResult(MonitorResult.Kind.CloseNoWrite, x.path));
                 }, (Event.Create x) {
                     rval.put(MonitorResult(MonitorResult.Kind.Create, x.path));
-                    fw.watchRecurse(x.path, events);
+                    fw.watchRecurse(x.path, events, a => isInteresting(fileFilter, a));
                 }, (Event.Modify x) {
                     rval.put(MonitorResult(MonitorResult.Kind.Modify, x.path));
                 }, (Event.MoveSelf x) {
                     rval.put(MonitorResult(MonitorResult.Kind.MoveSelf, x.path));
                     if (canFind!((a, b) => b.toString.startsWith(a.toString) != 0)(roots, x.path)) {
-                        fw.watchRecurse(x.path, events);
+                        fw.watchRecurse(x.path, events, a => isInteresting(fileFilter, a));
                     }
                 }, (Event.Delete x) {
                     rval.put(MonitorResult(MonitorResult.Kind.Delete, x.path));
@@ -699,7 +719,7 @@ struct Monitor {
             e.match!((Event.Access x) {}, (Event.Attribute x) {}, (Event.CloseWrite x) {
             }, (Event.CloseNoWrite x) {}, (Event.Create x) {
                 // add any new files/directories to be listened on
-                fw.watchRecurse(x.path, events);
+                fw.watchRecurse(x.path, events, a => isInteresting(fileFilter, a));
             }, (Event.Modify x) {}, (Event.MoveSelf x) {}, (Event.Delete x) {}, (Event.DeleteSelf x) {
             }, (Event.Rename x) {}, (Event.Open x) {},);
         }

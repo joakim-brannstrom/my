@@ -174,6 +174,8 @@ enum MetadataEvents = IN_ACCESS | IN_ATTRIB | IN_OPEN | IN_CLOSE_NOWRITE | IN_EX
 /** An instance of a FileWatcher
  */
 struct FileWatch {
+    import std.functional : toDelegate;
+
     private {
         int fd;
         ubyte[1024 * 4] eventBuffer; // 4kb buffer for events
@@ -242,7 +244,8 @@ struct FileWatch {
      *
      * Returns: paths that failed to be added.
      */
-    AbsolutePath[] watchRecurse(alias pred = allFiles)(Path root, uint events = ContentEvents) {
+    AbsolutePath[] watchRecurse(Path root, uint events = ContentEvents,
+            bool delegate(string) pred = toDelegate(&allFiles)) {
         import std.algorithm : filter;
         import my.file : existsAnd;
         import my.set;
@@ -286,8 +289,9 @@ struct FileWatch {
     }
 
     ///
-    AbsolutePath[] watchRecurse(alias pred = allFiles)(string root, uint events = ContentEvents) {
-        return watchRecurse!pred(Path(root), events);
+    AbsolutePath[] watchRecurse(string root, uint events = ContentEvents,
+            bool delegate(string) pred = toDelegate(&allFiles)) {
+        return watchRecurse(Path(root), events, pred);
     }
 
     /** The events that have occured since last query.

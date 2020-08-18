@@ -713,17 +713,30 @@ struct Monitor {
         return rval.data.filter!(a => fileFilter.match(a.path)).array;
     }
 
-    /// Clear the event listener of any residual events.
-    void clear() {
-        foreach (e; fw.getEvents(Duration.zero)) {
-            e.match!((Event.Access x) {}, (Event.Attribute x) {}, (Event.CloseWrite x) {
-            }, (Event.CloseNoWrite x) {}, (Event.Create x) {
-                // add any new files/directories to be listened on
-                fw.watchRecurse(x.path, events, a => isInteresting(fileFilter, a));
-            }, (Event.Modify x) {}, (Event.MoveSelf x) {}, (Event.Delete x) {}, (Event.DeleteSelf x) {
-            }, (Event.Rename x) {}, (Event.Open x) {},);
-        }
+    /** Clear the event listener of any residual events.
+     *
+     * Params:
+     *  clearTime = for how long to clear the queue
+     */
+    void clear(Duration clearTime = Duration.zero) {
+        import std.algorithm : max;
+        import std.datetime : Clock;
 
-        fw.getEvents;
+        const stopAt = Clock.currTime + clearTime;
+
+        do {
+            foreach (e; fw.getEvents(clearTime)) {
+                e.match!((Event.Access x) {}, (Event.Attribute x) {}, (Event.CloseWrite x) {
+                }, (Event.CloseNoWrite x) {}, (Event.Create x) {
+                    // add any new files/directories to be listened on
+                    fw.watchRecurse(x.path, events, a => isInteresting(fileFilter, a));
+                }, (Event.Modify x) {}, (Event.MoveSelf x) {}, (Event.Delete x) {
+                }, (Event.DeleteSelf x) {}, (Event.Rename x) {}, (Event.Open x) {
+                },);
+            }
+
+            clearTime = max(stopAt - Clock.currTime, Duration.zero);
+        }
+        while (Clock.currTime < stopAt);
     }
 }

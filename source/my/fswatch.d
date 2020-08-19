@@ -623,15 +623,20 @@ struct Monitor {
     import std.array : appender;
     import std.file : isDir;
     import std.utf : UTFException;
-    import my.fswatch;
     import my.filter : GlobFilter;
+    import my.fswatch;
+    import my.set;
     import sumtype;
 
     private {
-        AbsolutePath[] roots;
+        Set!AbsolutePath roots;
         FileWatch fw;
         GlobFilter fileFilter;
         uint events;
+
+        // roots that has been removed that may be re-added later on. the user
+        // expects them to trigger events.
+        Set!AbsolutePath monitorRoots;
     }
 
     /**
@@ -639,7 +644,7 @@ struct Monitor {
      *  roots = directories to recursively monitor
      */
     this(AbsolutePath[] roots, GlobFilter fileFilter, uint events = ContentEvents) {
-        this.roots = roots;
+        this.roots = toSet(roots);
         this.fileFilter = fileFilter;
         this.events = events;
 
@@ -671,11 +676,35 @@ struct Monitor {
         return false;
     }
 
+    /** Wait up to `timeout` for an event to occur for the monitored `roots`.
+     *
+     * Params:
+     *  timeout = how long to wait for the event
+     */
     MonitorResult[] wait(Duration timeout) {
         import std.array : array;
         import std.algorithm : canFind, startsWith, filter;
 
         auto rval = appender!(MonitorResult[])();
+
+        {
+            auto rm = appender!(AbsolutePath[])();
+            foreach (a; monitorRoots.toRange.filter!(a => exists(a))) {
+                fw.watchRecurse(a, events, a => isInteresting(fileFilter, a));
+                rm.put(a);
+                rval.put(MonitorResult(MonitorResult.Kind.Create, a));
+            }
+            foreach (a; rm) {
+                monitorRoots.remove(a);
+            }
+        }
+
+        if (!rval.data.empty) {
+            // collect whatever events that happend to have queued up together
+            // with the artifically created.
+            timeout = Duration.zero;
+        }
+
         try {
             foreach (e; fw.getEvents(timeout)) {
                 e.match!((Event.Access x) {
@@ -693,13 +722,19 @@ struct Monitor {
                     rval.put(MonitorResult(MonitorResult.Kind.Modify, x.path));
                 }, (Event.MoveSelf x) {
                     rval.put(MonitorResult(MonitorResult.Kind.MoveSelf, x.path));
-                    if (canFind!((a, b) => b.toString.startsWith(a.toString) != 0)(roots, x.path)) {
-                        fw.watchRecurse(x.path, events, a => isInteresting(fileFilter, a));
+                    fw.watchRecurse(x.path, events, a => isInteresting(fileFilter, a));
+
+                    if (x.path in roots) {
+                        monitorRoots.add(x.path);
                     }
                 }, (Event.Delete x) {
                     rval.put(MonitorResult(MonitorResult.Kind.Delete, x.path));
                 }, (Event.DeleteSelf x) {
                     rval.put(MonitorResult(MonitorResult.Kind.DeleteSelf, x.path));
+
+                    if (x.path in roots) {
+                        monitorRoots.add(x.path);
+                    }
                 }, (Event.Rename x) {
                     rval.put(MonitorResult(MonitorResult.Kind.Rename, x.to));
                 }, (Event.Open x) {
@@ -713,30 +748,50 @@ struct Monitor {
         return rval.data.filter!(a => fileFilter.match(a.path)).array;
     }
 
-    /** Clear the event listener of any residual events.
+    /** Collects events from the monitored `roots` over a period.
      *
      * Params:
-     *  clearTime = for how long to clear the queue
+     *  collectTime = for how long to clear the queue
      */
-    void clear(Duration clearTime = Duration.zero) {
-        import std.algorithm : max;
+    MonitorResult[] collect(Duration collectTime) {
+        import std.algorithm : max, min;
         import std.datetime : Clock;
 
-        const stopAt = Clock.currTime + clearTime;
+        auto rval = appender!(MonitorResult[])();
+        const stopAt = Clock.currTime + collectTime;
 
         do {
-            foreach (e; fw.getEvents(clearTime)) {
-                e.match!((Event.Access x) {}, (Event.Attribute x) {}, (Event.CloseWrite x) {
-                }, (Event.CloseNoWrite x) {}, (Event.Create x) {
-                    // add any new files/directories to be listened on
-                    fw.watchRecurse(x.path, events, a => isInteresting(fileFilter, a));
-                }, (Event.Modify x) {}, (Event.MoveSelf x) {}, (Event.Delete x) {
-                }, (Event.DeleteSelf x) {}, (Event.Rename x) {}, (Event.Open x) {
-                },);
+            collectTime = max(stopAt - Clock.currTime, 1.dur!"msecs");
+            if (!monitorRoots.empty) {
+                // must use a hybrid approach of poll + inotify because if a
+                // root is added it will only be detected by polling.
+                collectTime = min(10.dur!"msecs", collectTime);
             }
 
-            clearTime = max(stopAt - Clock.currTime, Duration.zero);
+            rval.put(wait(collectTime));
         }
         while (Clock.currTime < stopAt);
+
+        return rval.data;
     }
+}
+
+@("shall re-apply monitoring for a file that is removed")
+unittest {
+    import my.filter : GlobFilter;
+    import my.test;
+
+    auto ta = makeTestArea("re-apply monitoring");
+    const testTxt = ta.inSandbox("test.txt").AbsolutePath;
+
+    write(testTxt, "abc");
+    auto fw = Monitor([testTxt], GlobFilter(["*"], null));
+    write(testTxt, "abcc");
+    assert(!fw.wait(Duration.zero).empty);
+
+    remove(testTxt);
+    assert(!fw.wait(Duration.zero).empty);
+
+    write(testTxt, "abcc");
+    assert(!fw.wait(Duration.zero).empty);
 }

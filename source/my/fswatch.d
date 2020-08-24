@@ -694,7 +694,7 @@ struct Monitor {
                 rm.put(a);
                 rval.put(MonitorResult(MonitorResult.Kind.Create, a));
             }
-            foreach (a; rm) {
+            foreach (a; rm.data) {
                 monitorRoots.remove(a);
             }
         }

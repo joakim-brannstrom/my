@@ -132,7 +132,7 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
         this.value = v.value;
     }
 
-    T opCast(T2 : T)() {
+    T opCast(T2 : T)() inout {
         return value;
     }
 
@@ -367,4 +367,13 @@ unittest {
     A[A] x;
     x[A(10)] = A(20);
     assert(x[A(10)] == A(20));
+}
+
+@("shall be possible to cast to the underlying type")
+unittest {
+    alias A = NamedTypeT!(int);
+    auto a = A(10);
+    const b = A(20);
+    assert(10 == cast(int) a);
+    assert(20 == cast(int) b);
 }

@@ -166,9 +166,11 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
     static foreach (Tr; staticMap!(ReplaceTrait, Traits)) {
         //pragma(msg, Tr);
         static if (is(Tr == Comparable)) {
-            // Alternatively, you can declare a single templated opEquals
-            // function with an auto ref parameter: for l-values and r-values,
-            bool opEquals()(auto ref const typeof(this) rhs) {
+            bool opEquals(const typeof(this) rhs) inout {
+                return value == rhs.value;
+            }
+
+            bool opEquals(ref const typeof(this) rhs) inout {
                 return value == rhs.value;
             }
 
@@ -180,6 +182,18 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
                 if (value > rhs.value)
                     return 1;
                 return 0;
+            }
+        } else static if (is(Tr == Hashable)) {
+            import std.traits;
+
+            static if (hasMember!(T, "toHash")) {
+                size_t toHash(T2 = typeof(this))() {
+                    return value.toHash;
+                }
+            } else {
+                size_t toHash() @safe nothrow const scope {
+                    return typeid(value).getHash(&value);
+                }
             }
         } else static if (is(Tr == Incrementable)) {
             auto opUnary(string op)() if (op == "++") {
@@ -227,7 +241,6 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
                     if (isOutputRange!(Writer, char)) {
                 import std.range : put;
 
-                pragma(msg, Tag.toString);
                 put(w, Tag.toString);
                 put(w, "(");
                 formatValue(w, value, fmt);
@@ -266,10 +279,13 @@ struct Multiplicable {
 struct Printable {
 }
 
-struct Arithmetic {
+struct ImplicitConvertable {
 }
 
-struct ImplicitConvertable {
+struct Hashable {
+}
+
+struct Arithmetic {
 }
 
 @("shall be possible to use a NamedType to express the intent of parameters")
@@ -303,8 +319,6 @@ unittest {
 
 @("shall implement the arithmetic operators")
 unittest {
-    import std.stdio;
-
     alias A = NamedType!(int, Tag!"x", 0, Arithmetic);
     auto x = A(10);
     auto y = A(20);
@@ -345,4 +359,12 @@ unittest {
     }
 
     assert(fun(A.argument = 10));
+}
+
+@("shall be possible to use in an AA")
+unittest {
+    alias A = NamedType!(long, Tag!"A", 0, Comparable, Hashable);
+    A[A] x;
+    x[A(10)] = A(20);
+    assert(x[A(10)] == A(20));
 }

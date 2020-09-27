@@ -141,6 +141,11 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
         return value;
     }
 
+    /// Useful for e.g. getopt integration
+    scope T* getPtr() {
+        return &value;
+    }
+
     static typeof(this) make(T v) {
         return typeof(this)(v);
     }
@@ -184,9 +189,7 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
                 return 0;
             }
         } else static if (is(Tr == Hashable)) {
-            import std.traits;
-
-            static if (hasMember!(T, "toHash")) {
+            static if (__traits(hasMember, T, "toHash")) {
                 size_t toHash(T2 = typeof(this))() {
                     return value.toHash;
                 }

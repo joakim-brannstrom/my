@@ -137,7 +137,7 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
     }
 
     /// The underlying value.
-    ref T get() {
+    ref inout(T) get() inout {
         return value;
     }
 
@@ -376,4 +376,11 @@ unittest {
     const b = A(20);
     assert(10 == cast(int) a);
     assert(20 == cast(int) b);
+}
+
+@("shall be possible to call get of a const instance")
+unittest {
+    alias A = NamedTypeT!(int);
+    const b = A(20);
+    assert(20 == b.get);
 }

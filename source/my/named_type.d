@@ -391,8 +391,16 @@ unittest {
 @("shall only use the Tag when printing")
 unittest {
     import std.format : format;
+    import std.conv : to;
 
     alias A = NamedTypeT!(int, Printable);
-    auto s = format!"value is %s"(A(10));
-    assert(s == "value is int(10)");
+    {
+        auto s = format!"value is %s"(A(10));
+        assert(s == "value is int(10)");
+    }
+
+    {
+        auto s = A(10).to!string;
+        assert(s == "int(10)");
+    }
 }

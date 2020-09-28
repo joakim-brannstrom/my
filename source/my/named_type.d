@@ -387,3 +387,12 @@ unittest {
     const b = A(20);
     assert(20 == b.get);
 }
+
+@("shall only use the Tag when printing")
+unittest {
+    import std.format : format;
+
+    alias A = NamedTypeT!(int, Printable);
+    auto s = format!"value is %s"(A(10));
+    assert(s == "value is int(10)");
+}

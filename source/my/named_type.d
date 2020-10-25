@@ -244,7 +244,7 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
         } else static if (is(Tr == TagStringable)) {
             import std.format : singleSpec, FormatSpec, formatValue;
 
-            string toString(T2 = typeof(this))() {
+            string toString(T2 = typeof(this))() inout {
                 import std.array : appender;
 
                 auto buf = appender!string;
@@ -253,7 +253,7 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
                 return buf.data;
             }
 
-            void toString(Writer, T2 = typeof(this))(ref Writer w, scope const ref FormatSpec!char fmt)
+            void toString(Writer, T2 = typeof(this))(ref Writer w, scope const ref FormatSpec!char fmt) inout
                     if (isOutputRange!(Writer, char)) {
                 import std.range : put;
 
@@ -265,14 +265,14 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
         } else static if (is(Tr == ForwardStringable)) {
             import std.format : singleSpec, FormatSpec, formatValue;
 
-            string toString(T2 = typeof(this))() {
+            string toString(T2 = typeof(this))() inout {
                 static if (__traits(hasMember, T, "toString"))
                     return value.toString();
                 else
                     return value;
             }
 
-            void toString(Writer, T2 = typeof(this))(ref Writer w, scope const ref FormatSpec!char fmt)
+            void toString(Writer, T2 = typeof(this))(ref Writer w, scope const ref FormatSpec!char fmt) inout
                     if (isOutputRange!(Writer, char)) {
                 import std.range : put;
 
@@ -282,7 +282,7 @@ struct NamedType(T, TagT = Tag!(T.stringof), T init = T.init, TraitsT...)
                     return put(w, value);
             }
         } else static if (is(Tr == ConvertStringable)) {
-            string toString(T2 = typeof(this))() {
+            string toString(T2 = typeof(this))() inout {
                 import std.conv : to;
 
                 return value.to!string();
@@ -458,6 +458,16 @@ unittest {
     import std.conv : to;
 
     alias A = NamedTypeT!(int, TagStringable);
+    const a = A(10);
+    {
+        auto s = format!"value is %s"(a);
+        assert(s == "value is int(10)");
+    }
+
+    {
+        auto s = a.to!string;
+        assert(s == "int(10)");
+    }
 }
 
 @("shall forward toString to the underlying type")
@@ -466,13 +476,14 @@ unittest {
     import std.conv : to;
 
     alias A = NamedTypeT!(string, ForwardStringable);
+    const a = A("apa");
     {
-        auto s = format!"value is %s"(A("apa"));
+        auto s = format!"value is %s"(a);
         assert(s == "value is apa");
     }
 
     {
-        auto s = A("apa").to!string;
+        auto s = a.to!string;
         assert(s == "apa");
     }
 }
@@ -483,13 +494,14 @@ unittest {
     import std.conv : to;
 
     alias A = NamedTypeT!(int, ConvertStringable);
+    const a = A(10);
     {
-        auto s = format!"value is %s"(A(10));
+        auto s = format!"value is %s"(a);
         assert(s == "value is 10");
     }
 
     {
-        auto s = A(10).to!string;
+        auto s = a.to!string;
         assert(s == "10");
     }
 }

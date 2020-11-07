@@ -88,9 +88,16 @@ void setInteractiveTty(ref std_.stdio.File tty) {
 }
 
 /// Returns: if stderr or stdout is an interactive tty
-bool isInteractive() {
+bool isStdoutInteractive() {
     import core.stdc.stdio;
     import core.sys.posix.unistd;
 
-    return !isatty(STDERR_FILENO) || !isatty(STDOUT_FILENO);
+    return isatty(STDOUT_FILENO) == 1;
+}
+
+bool isStderrInteractive() {
+    import core.stdc.stdio;
+    import core.sys.posix.unistd;
+
+    return isatty(STDERR_FILENO) == 1;
 }

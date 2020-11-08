@@ -163,7 +163,13 @@ struct PositionPid {
         integral = clamp(integral, integral_low, integral_high);
 
         // derivative on measurement, eliminate spikes when sv changes.
-        double derivative = Kd * (e - prev_e);
+        double derivative = 0;
+        if (useDFilter) {
+            dFilter.input(e - prev_e);
+            derivative = Kd * dFilter.output;
+        } else {
+            derivative = Kd * (e - prev_e);
+        }
 
         output_ = Kp * e + integral + derivative;
         output_ = clamp(output_, output_low, output_high);
@@ -201,6 +207,11 @@ struct PositionPid {
     /// Derivative gain.
     void setKd(double x) {
         Kd = x;
+    }
+
+    void setKd(LowPassFilter lp) {
+        dFilter = lp;
+        useDFilter = true;
     }
 
     /// Clamps the integration to the range [low, high].
@@ -259,6 +270,10 @@ private:
     /// Track error over time.
     double integral = 0;
 
+    /// filter to use for the derivative
+    LowPassFilter dFilter;
+    bool useDFilter;
+
     /// Clamp of the integral.
     double integral_low = double.min_10_exp;
     double integral_high = double.max_10_exp;
@@ -282,9 +297,10 @@ unittest {
     const double kp = 0.1;
     const double ki = 0.125;
 
-    auto pid = PositionPid(kp, ki, 0);
+    auto pid = PositionPid(kp, ki, 4);
     pid.setIntegralClamp(-clamp, clamp);
     pid.setOutputClamp(-clamp, clamp);
+    pid.setKd(LowPassFilter(1, 10));
 
     while (sim.currTime < 1000.dur!"msecs") {
         sim.tick!"nsecs"(pid);
@@ -295,8 +311,8 @@ unittest {
         }
     }
 
-    assert(sim.pv.total!"nsecs" < 1000);
-    assert(pid.output < 1000.0);
+    assert(sim.pv.total!"msecs" < 100);
+    assert(pid.output < 10000.0);
 }
 
 struct Simulator {
@@ -362,4 +378,30 @@ struct Simulator {
         targetTime += period;
         updatePid = true;
     }
+};
+
+/// A first order low pass filter.
+struct LowPassFilter {
+    /**
+     * Params:
+     *  dt = time interval
+     *  RC = time constant
+     */
+    this(double dt, double RC) {
+        this.dt = dt;
+        alpha = dt / (RC + dt);
+    }
+
+    void input(double x) {
+        y = alpha * x + (1.0 - alpha) * y;
+    }
+
+    double output() {
+        return y;
+    }
+
+private:
+    double dt = 1;
+    double alpha = 0;
+    double y = 0;
 };

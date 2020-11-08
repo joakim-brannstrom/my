@@ -126,7 +126,7 @@ really becomes a discussion of what interacts with what. To be safe, think
 of the word interacting as one to identify the algorithm, not to describe
 it.
 */
-module my.pid;
+module my.signal_theory.pid;
 
 import core.time : dur, Duration;
 

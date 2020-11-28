@@ -7,6 +7,8 @@ module my.signal_theory.simulate;
 
 import core.time : Duration, dur;
 
+@safe:
+
 struct Simulator {
     import std.random;
 
@@ -44,7 +46,7 @@ struct Simulator {
         return uniform!"[]"(-1.0, 1.0, g);
     }
 
-    void tick(string TsUnit)(void delegate(Duration) inputFn, double delegate() outputFn) {
+    void tick(string TsUnit)(void delegate(Duration) @safe inputFn, double delegate() @safe outputFn) {
         currTime += simTick;
         updated = false;
 

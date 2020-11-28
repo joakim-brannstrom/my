@@ -130,6 +130,8 @@ module my.signal_theory.pid;
 
 import core.time : dur, Duration;
 
+@safe:
+
 /** A discrete position PID controller.
  *
  * Implemented internally using floating point to simplify the code. Change to

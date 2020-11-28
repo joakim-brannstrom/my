@@ -9,6 +9,8 @@ import core.time : Duration, dur;
 import std.math : abs;
 import std.range : isOutputRange;
 
+@safe:
+
 /// Kalman filter for a unidimensional models.
 struct KalmanFilter {
     double currentEstimate = 0;

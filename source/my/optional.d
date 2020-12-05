@@ -33,8 +33,12 @@ struct Some(T) {
     alias value this;
 }
 
-U orElse(T, U)(T o, U or) if (is(T == Optional!U)) {
-    return match!((None a) => or, (Some!U a) => a.value)(o);
+bool hasValue(T : SumType!(None, Some!U), U)(T v) {
+    return match!((None a) => false, (Some!U a) => true)(v);
+}
+
+U orElse(T, U)(T v, U or) if (is(T == Optional!U)) {
+    return match!((None a) => or, (Some!U a) => a.value)(v);
 }
 
 T orElse(T : SumType!(None, Some!U), U)(T v, T or) {
@@ -60,6 +64,9 @@ unittest {
     static Optional!int fn2() {
         return some(5);
     }
+
+    assert(none!int.hasValue == false);
+    assert(some(5).hasValue == true);
 
     assert(none!int.orElse(5) == 5);
     assert(none!int.orElse(() => 5) == 5);

@@ -5,7 +5,46 @@ Author: Sebastiaan de Schaetzen
 
 Author: Joakim Brännström (joakim.brannstrom@gmx.com) (modifications)
 
+**All** credit goes to Sebastiaan. It is only copied here for convenience.
+
 A simple to use async/await library.
+
+# dawait - A simple to use async/await library
+
+This library provides a very easy-to-use async/await library for D.
+It consists of only three functions: `async`, `await`, and `startScheduler`.
+The library is build on top of D's fibers and allows for easier cooperative multitasking.
+
+## Functionality
+
+|Function|Description|
+|--------|-----------|
+|`startScheduler(void delegate() callback)`| Starts the scheduler with an initial task.|
+|`async(void delegate() callback)`|Runs the given delegate in a separate fiber.|
+|`await(lazy T task)`|Runs the expression in a separate thread. Once the thread has completely, the result is returned.|
+
+## Code Example
+```d
+import std.stdio;
+
+int calculateTheAnswer() {
+    import core.thread : Thread;
+    Thread.sleep(5.seconds);
+    return 42;
+}
+
+void doTask() {
+    writeln("Calculating the answer to life, the universe, and everything...");
+    int answer = await(calculateTheAnswer());
+    writeln("The answer is: ", answer);
+}
+
+void main() {
+    startScheduler({
+        doTask();
+    });
+}
+```
 */
 module my.await;
 
@@ -14,11 +53,9 @@ import std.container;
 import core.thread.fiber;
 import core.sync.semaphore;
 
-version (unittest) import fluent.asserts;
-
 private SList!Fiber fibersQueued = SList!Fiber();
 private size_t globalWaitingOnThreads = 0;
-private __gshared Semaphore globalSync;
+private shared Semaphore globalSync;
 
 /**
 Creates an async task.
@@ -37,9 +74,11 @@ void async(void delegate() task) {
 unittest {
     scope (exit)
         fibersQueued = SList!Fiber();
-    fibersQueued.empty.should.equal(true).because("there should be no queued tasks at first");
+    // there should be no queued tasks at first"
+    assert(fibersQueued.empty);
     async({});
-    fibersQueued.empty.should.equal(false).because("there should be a single task");
+    // there should be a single task
+    assert(!fibersQueued.empty);
 }
 
 @("async should not immediately execute its task")
@@ -49,7 +88,8 @@ unittest {
     bool executed = false;
     auto executeIt = { executed = true; };
     async(executeIt);
-    executed.should.equal(false).because("async should not execute its operand");
+    // async should not execute its operand
+    assert(!executed);
 }
 
 /**
@@ -67,7 +107,7 @@ in (Fiber.getThis() !is null && globalSync !is null) {
             finished = true;
         assert(semaphore !is null);
         result = task;
-        semaphore.notify();
+        (cast(Semaphore) semaphore).notify();
     }).executeInNewThread();
 
     while (!finished) {
@@ -84,7 +124,8 @@ unittest {
         fibersQueued = SList!Fiber();
     bool executed = false;
     startScheduler({ await(executed = true); });
-    executed.should.equal(true).because("a quick thread should run");
+    // a quick thread should run
+    assert(executed);
 }
 
 @("await can run a slow thread")
@@ -102,7 +143,8 @@ unittest {
     }
 
     startScheduler({ await(largeTask()); });
-    executed.should.equal(true).because("a slow thread should run");
+    // a slow thread should run
+    assert(executed);
 }
 
 @("await should return the value that was calculated")
@@ -116,14 +158,15 @@ unittest {
     }
 
     startScheduler({ executed = await(someTask()); });
-    executed.should.equal(true).because("a slow thread should run");
+    // a slow thread should run
+    assert(executed);
 }
 
 /**
 Starts the scheduler.
 */
 void startScheduler(void delegate() firstTask) {
-    globalSync = new Semaphore;
+    globalSync = cast(shared) new Semaphore;
     async({ firstTask(); });
 
     while (!fibersQueued.empty) {
@@ -136,7 +179,7 @@ void startScheduler(void delegate() firstTask) {
         }
 
         if (globalWaitingOnThreads > 0) {
-            globalSync.wait();
+            (cast(Semaphore) globalSync).wait();
         }
     }
 }
@@ -147,7 +190,8 @@ unittest {
         fibersQueued = SList!Fiber();
     bool executed = false;
     startScheduler({ executed = true; });
-    executed.should.equal(true).because("startScheduler should execute the initial task");
+    // startScheduler should execute the initial task
+    assert(executed);
 }
 
 @("startScheduler should also run tasks registered before itself")
@@ -157,8 +201,8 @@ unittest {
     bool executed = false;
     async({ executed = true; });
     startScheduler({});
-    executed.should.equal(true)
-        .because("startScheduler should execute the task executed before itself");
+    // startScheduler should execute the task executed before itself
+    assert(executed);
 }
 
 @("startScheduler should also run tasks registered by the initial task")
@@ -167,6 +211,6 @@ unittest {
         fibersQueued = SList!Fiber();
     bool executed = false;
     startScheduler({ async({ executed = true; }); });
-    executed.should.equal(true)
-        .because("startScheduler should execute the task created during the initial task");
+    // startScheduler should execute the task created during the initial task
+    assert(executed);
 }

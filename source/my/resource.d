@@ -122,7 +122,7 @@ Optional!ResourceFile resolve(const AbsolutePath[] searchIn, const Path lookFor)
 }
 
 /// A convenient function to read a file as a text string from a resource.
-string readResource(T)(const ResourceFile r) {
+string readResource(const ResourceFile r) {
     import std.file : readText;
 
     return readText(r.get);

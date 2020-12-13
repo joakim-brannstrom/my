@@ -25,7 +25,7 @@ TestArea makeTestArea(string name, string file = __FILE__) {
 }
 
 struct TestArea {
-    import std.file : rmdirRecurse, mkdirRecurse, exists, readText;
+    import std.file : rmdirRecurse, mkdirRecurse, exists, readText, chdir;
     import std.process : wait;
     import std.stdio : File, stdin;
     static import std.process;
@@ -33,13 +33,29 @@ struct TestArea {
     const AbsolutePath sandboxPath;
     private int commandLogCnt;
 
+    private AbsolutePath root;
+    private bool chdirToRoot;
+
     this(string name) {
+        root = AbsolutePath(".");
         sandboxPath = buildPath(tmpDir, name).AbsolutePath;
 
         if (exists(sandboxPath)) {
             rmdirRecurse(sandboxPath);
         }
         mkdirRecurse(sandboxPath);
+    }
+
+    ~this() {
+        if (chdirToRoot) {
+            chdir(root);
+        }
+    }
+
+    /// Change current working directory to the sandbox. It is reset in the dtor.
+    void chdirToSandbox() {
+        chdirToRoot = true;
+        chdir(sandboxPath);
     }
 
     /// Execute a command in the sandbox.

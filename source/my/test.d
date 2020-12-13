@@ -24,6 +24,11 @@ TestArea makeTestArea(string name, string file = __FILE__) {
     return TestArea(buildPath(file.baseName, name));
 }
 
+struct ExecResult {
+    int status;
+    string output;
+}
+
 struct TestArea {
     import std.file : rmdirRecurse, mkdirRecurse, exists, readText, chdir;
     import std.process : wait;
@@ -59,38 +64,40 @@ struct TestArea {
     }
 
     /// Execute a command in the sandbox.
-    string exec(Args...)(auto ref Args args_) {
+    ExecResult exec(Args...)(auto ref Args args_) {
         string[] args;
         static foreach (a; args_)
             args ~= a;
 
         const log = inSandbox(format!"command%s.log"(commandLogCnt++).Path);
 
+        int exitCode = 1;
         try {
             auto fout = File(log, "w");
             fout.writefln("%-(%s %)", args);
 
-            auto exitCode = std.process.spawnProcess(args, stdin, fout, fout,
-                    env, std.process.Config.none, sandboxPath).wait;
+            exitCode = std.process.spawnProcess(args, stdin, fout, fout, null,
+                    std.process.Config.none, sandboxPath).wait;
             fout.writeln("exit code: ", exitCode);
         } catch (Exception e) {
         }
-        return readText(log);
+        return ExecResult(exitCode, readText(log));
     }
 
-    string exec(string[] args, string[string] env) {
+    ExecResult exec(string[] args, string[string] env) {
         const log = inSandbox(format!"command%s.log"(commandLogCnt++).Path);
 
+        int exitCode = 1;
         try {
             auto fout = File(log, "w");
             fout.writefln("%-(%s %)", args);
 
-            auto exitCode = std.process.spawnProcess(args, stdin, fout, fout,
-                    env, std.process.Config.none, sandboxPath).wait;
+            exitCode = std.process.spawnProcess(args, stdin, fout, fout, env,
+                    std.process.Config.none, sandboxPath).wait;
             fout.writeln("exit code: ", exitCode);
         } catch (Exception e) {
         }
-        return readText(log);
+        return ExecResult(exitCode, readText(log));
     }
 
     Path inSandbox(string fileName) @safe pure nothrow const {

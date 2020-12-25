@@ -9,6 +9,10 @@ convenient range operations.
 */
 module my.container.vector;
 
+auto vector(T)(T[] data) {
+    return Vector!T(data);
+}
+
 struct Vector(T) {
     T[] data;
 

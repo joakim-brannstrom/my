@@ -103,6 +103,33 @@ unittest {
     assert(global.x == 1);
 }
 
+@("shall use a struct to provide the state callbacks")
+unittest {
+    static struct A {
+    }
+
+    static struct B {
+    }
+
+    static struct Foo {
+        Fsm!(A, B) fsm;
+        bool running = true;
+
+        void opCall(A a) {
+        }
+
+        void opCall(B b) {
+            running = false;
+        }
+    }
+
+    Foo foo;
+    while (foo.running) {
+        foo.fsm.next!((A a) => B.init, (B a) => a);
+        foo.fsm.act!foo;
+    }
+}
+
 /** Hold a mapping between a Type and data.
  *
  * The get function is used to get the corresponding data.

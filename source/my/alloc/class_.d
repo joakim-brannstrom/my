@@ -38,7 +38,7 @@ T make(T, Allocator, Args...)(auto ref Allocator allocator, auto ref Args args) 
  * because that will lead to random crashes.
  *
  */
-struct Bundle(Allocator) {
+@safe struct Bundle(Allocator) {
     import std.traits : hasMember;
     import std.experimental.allocator : theAllocator;
 
@@ -94,6 +94,7 @@ struct Bundle(Allocator) {
             auto repr = (cast(void*) n.obj)[0 .. n.sz];
             GC.removeRange(&repr[(void*).sizeof]);
         }
+        objects = null;
     }
 
     bool empty() @safe pure nothrow const @nogc {

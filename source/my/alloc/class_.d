@@ -14,7 +14,8 @@ module my.alloc.class_;
  * The class will always be tracked by the GC, no option here. This is because
  * then it is easy to use this function correctly.
  */
-T make(T, Allocator, Args...)(auto ref Allocator allocator, auto ref Args args) {
+T make(T, Allocator, Args...)(auto ref Allocator allocator, auto ref Args args)
+        if (is(T == class) || is(T == interface)) {
     import core.memory : GC;
     import std.experimental.allocator : make;
     import std.functional : forward;
@@ -27,6 +28,23 @@ T make(T, Allocator, Args...)(auto ref Allocator allocator, auto ref Args args) 
     }();
 
     return obj;
+}
+
+void dispose(T, Allocator)(auto ref Allocator allocator_, auto ref T obj)
+        if (is(T == class) || is(T == interface)) {
+    enum sz = __traits(classInstanceSize, T);
+    dispose(allocator_, cast(Object) obj, sz);
+}
+
+void dispose(Allocator)(auto ref Allocator allocator_, Object obj, size_t sz) {
+    import core.memory : GC;
+    static import my.alloc.dispose_;
+
+    () @trusted {
+        my.alloc.dispose_.dispose(allocator_, obj);
+        auto repr = (cast(void*) obj)[0 .. sz];
+        GC.removeRange(&repr[(void*).sizeof]);
+    }();
 }
 
 /** A bundle of classes (different classes) that are destroyed and freed when
@@ -75,7 +93,7 @@ T make(T, Allocator, Args...)(auto ref Allocator allocator, auto ref Args args) 
         release;
     }
 
-    T make(T, Args...)(auto ref Args args) {
+    T make(T, Args...)(auto ref Args args) if (is(T == class) || is(T == interface)) {
         import std.functional : forward;
 
         enum sz = __traits(classInstanceSize, T);
@@ -86,13 +104,8 @@ T make(T, Allocator, Args...)(auto ref Allocator allocator, auto ref Args args) 
 
     /// Destroying and release the memory of all objects.
     void release() @trusted {
-        import core.memory : GC;
-        static import my.alloc.dispose_;
-
         foreach (n; objects) {
-            my.alloc.dispose_.dispose(allocator_, n.obj);
-            auto repr = (cast(void*) n.obj)[0 .. n.sz];
-            GC.removeRange(&repr[(void*).sizeof]);
+            .dispose(allocator_, n.obj, n.sz);
         }
         objects = null;
     }

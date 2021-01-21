@@ -95,6 +95,14 @@ struct Bundle(Allocator) {
             GC.removeRange(&repr[(void*).sizeof]);
         }
     }
+
+    bool empty() @safe pure nothrow const @nogc {
+        return objects.length == 0;
+    }
+
+    size_t length() @safe pure nothrow const @nogc {
+        return objects.length;
+    }
 }
 
 @("shall alloc and destroy objects")

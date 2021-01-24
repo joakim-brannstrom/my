@@ -52,9 +52,7 @@ struct MemFree {
      * It terminates when the destructor is called.
      */
     void start() @trusted {
-        data = Data.init;
-        data.bg = spawn(&tick);
-        data.isRunning = true;
+        data = Data(true, spawn(&tick));
     }
 
 }

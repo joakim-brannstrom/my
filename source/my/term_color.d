@@ -194,17 +194,12 @@ void initColors(bool forceOn = false) @trusted {
     scope (exit)
         _isColorsInitialized = true;
 
-    // Initially enable colors, we'll disable them during this functions if we
-    // find any reason to
-    _printColors = true;
-
     version (Windows) {
         _printColors = false;
     } else {
         import my.tty;
 
-        if (isStdoutInteractive && isStderrInteractive)
-            _printColors = false;
+        _printColors = isStdoutInteractive && isStderrInteractive;
     }
 }
 

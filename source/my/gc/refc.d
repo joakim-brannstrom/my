@@ -109,8 +109,7 @@ struct RefCounted(T) {
         else
             auto rawMem = new ubyte[Impl.sizeof];
         impl = (() @trusted => cast(Impl*) rawMem.ptr)();
-        emplace(impl, args);
-        () @trusted { GC.addRoot(impl); }();
+        () @trusted { emplace(impl, args); GC.addRoot(impl); }();
     }
 
     this(this) {

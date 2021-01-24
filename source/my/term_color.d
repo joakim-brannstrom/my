@@ -3,8 +3,9 @@ Copyright: Copyright (c) 2021, Joakim Brännström. All rights reserved.
 License: $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost Software License 1.0)
 Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 
-Terminal colors. Colors are automatically toggled off if the output is not an
-interactive tty.
+Terminal colors. initColors must be called for the colors to be activated.
+Colors are automatically toggled off if the output is not an interactive tty.
+This can be bypassed by calling initColors with `true`.
 */
 module my.term_color;
 
@@ -17,6 +18,8 @@ unittest {
     import std.traits;
     import std.conv;
     import std.string;
+
+    initColors(true);
 
     foreach (c; EnumMembers!Color) {
         write(c.to!string.color(c).toString.rightJustify(30));
@@ -159,6 +162,7 @@ auto color(string s, Color c = Color.none) @safe pure nothrow @nogc {
 
 @("shall be safe to color a string")
 @safe unittest {
+    initColors(true);
     auto s = "foo".color(Color.red).bg(Background.black).mode(Mode.bold).toString;
 }
 
@@ -166,22 +170,12 @@ auto color(string s, Color c = Color.none) @safe pure nothrow @nogc {
 @safe unittest {
     import std.stdio;
 
+    initColors(true);
     writeln("opDispatch".color.fgred);
     writeln("opDispatch".color.bgGreen);
     writeln("opDispatch".color.bold);
     writeln("opDispatch".color.fgred.bggreen.bold);
 }
-
-private:
-
-/** Whether to print text with colors or not
- *
- * Defaults to true but will be set to false in initColors() if stdout or
- * stderr are not a TTY (which means the output is probably being piped and we
- * don't want ASCII escape chars in it)
-*/
-private shared bool _printColors = true;
-private shared bool _isColorsInitialized = false;
 
 /** It will detect whether or not stdout/stderr are a console/TTY and will
  * consequently disable colored output if needed.
@@ -189,7 +183,12 @@ private shared bool _isColorsInitialized = false;
  * Forgetting to call the function will result in ASCII escape sequences in the
  * piped output, probably an undesiderable thing.
  */
-void initColors() @trusted {
+void initColors(bool forceOn = false) @trusted {
+    if (forceOn) {
+        _printColors = true;
+        return;
+    }
+
     if (_isColorsInitialized)
         return;
     scope (exit)
@@ -208,3 +207,14 @@ void initColors() @trusted {
             _printColors = false;
     }
 }
+
+private:
+
+/** Whether to print text with colors or not
+ *
+ * Defaults to true but will be set to false in initColors() if stdout or
+ * stderr are not a TTY (which means the output is probably being piped and we
+ * don't want ASCII escape chars in it)
+*/
+private shared bool _printColors = false;
+private shared bool _isColorsInitialized = false;

@@ -8,7 +8,7 @@ A variaty of libc bindings.
 module my.libc;
 
 // malloc_trim - release free memory from the heap
-extern (C) int malloc_trim(size_t pad) nothrow @system;
+extern (C) int malloc_trim(size_t pad) @nogc nothrow @system;
 
 /**
 DESCRIPTION
@@ -25,4 +25,4 @@ DIAGNOSTICS
      If the load average was unobtainable, -1 is returned; otherwise, the num-
      ber of samples actually retrieved is returned.
  */
-extern (C) int getloadavg(double* loadavg, int nelem) nothrow;
+extern (C) int getloadavg(double* loadavg, int nelem) @nogc nothrow @system;

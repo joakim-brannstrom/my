@@ -28,3 +28,52 @@ unittest {
     assert(a.contains!bool);
     assert(!a.contains!int);
 }
+
+/** Restrict matching in a sumtype to a bundle of types.
+ *
+ */
+template restrictTo(Args...) if (Args.length >= 1) {
+    import std.meta : IndexOf = staticIndexOf;
+
+    alias Types = Args[0 .. $ - 1];
+    alias fun = Args[$ - 1];
+
+    auto ref restrictTo(T)(auto ref T value) if (IndexOf!(T, Types) >= 0) {
+        import core.lifetime : forward;
+
+        static assert(IndexOf!(T, Types) >= 0);
+        return fun(forward!value);
+    }
+}
+
+@("shall restrict matching")
+unittest {
+    static struct Foo0 {
+    }
+
+    static struct Foo1 {
+    }
+
+    static struct Foo2 {
+    }
+
+    static struct Foo3 {
+    }
+
+    static struct Foo4 {
+    }
+
+    static struct Bar0 {
+    }
+
+    static struct Bar1 {
+    }
+
+    static struct Bar2 {
+    }
+
+    SumType!(Foo0, Foo1, Foo2, Foo3, Foo4, Bar0, Bar1, Bar2) someType;
+
+    someType.match!(restrictTo!(Foo0, Foo1, Foo2, Foo3, val => {}),
+            restrictTo!(Bar0, Bar1, Bar2, val => {}), _ => {});
+}

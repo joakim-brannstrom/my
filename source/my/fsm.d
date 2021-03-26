@@ -27,7 +27,8 @@ struct Fsm(StateTT...) {
 
     /// Log messages of the last state transition (next).
     /// Only updated in debug build.
-    string logNext;
+    alias LogFn = void delegate(string msg);
+    LogFn logger;
 
     /// Helper function to convert the return type to `StateT`.
     static StateT opCall(T)(auto ref T a) {
@@ -58,7 +59,8 @@ template next(handlers...) {
         alias Handlers = staticMap!(CoerceReturnSelf, handlers);
 
         auto nextSt = sumtype.match!Handlers(self.state);
-        debug self.logNext = format!"%s -> %s"(self.state, nextSt);
+        if (self.logger)
+            self.logger(format!"%s -> %s"(self.state, nextSt));
 
         self.state = nextSt;
     }

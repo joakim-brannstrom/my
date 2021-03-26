@@ -37,23 +37,25 @@ struct Fsm(StateTT...) {
 
 /// Transition to the next state.
 template next(handlers...) {
-    void next(Self)(auto ref Self self) if (is(Self : Fsm!StateT, StateT...)) {
-        import std.meta : staticMap;
-        import std.traits : Parameters, ReturnType;
-        static import sumtype;
+    import std.traits : Parameters, ReturnType;
 
-        template CoerceReturn(alias Matcher) {
-            alias P = Parameters!Matcher;
-            static if (is(ReturnType!Matcher == Self.StateT)) {
-                alias CoerceReturn = Matcher;
-            } else {
-                static Self.StateT CoerceReturn(P[0] a) {
-                    return Self.StateT(Matcher(a));
-                }
+    template CoerceReturn(Self, alias Matcher) {
+        alias P = Parameters!Matcher;
+        static if (is(ReturnType!Matcher == Self.StateT)) {
+            alias CoerceReturn = Matcher;
+        } else {
+            Self.StateT CoerceReturn(P[0] a) {
+                return Self.StateT(Matcher(a));
             }
         }
+    }
 
-        alias Handlers = staticMap!(CoerceReturn, handlers);
+    void next(Self)(auto ref Self self) if (is(Self : Fsm!StateT, StateT...)) {
+        import std.meta : staticMap;
+        static import sumtype;
+
+        alias CoerceReturnSelf(alias Matcher) = CoerceReturn!(Self, Matcher);
+        alias Handlers = staticMap!(CoerceReturnSelf, handlers);
 
         auto nextSt = sumtype.match!Handlers(self.state);
         debug self.logNext = format!"%s -> %s"(self.state, nextSt);

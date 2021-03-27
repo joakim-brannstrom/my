@@ -27,7 +27,7 @@ struct Fsm(StateTT...) {
 
     /// Log messages of the last state transition (next).
     /// Only updated in debug build.
-    alias LogFn = void delegate(string msg);
+    alias LogFn = void delegate(string msg) @safe;
     LogFn logger;
 
     /// Helper function to convert the return type to `StateT`.

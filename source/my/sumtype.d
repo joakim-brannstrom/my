@@ -77,3 +77,32 @@ unittest {
     someType.match!(restrictTo!(Foo0, Foo1, Foo2, Foo3, val => {}),
             restrictTo!(Bar0, Bar1, Bar2, val => {}), _ => {});
 }
+
+/// For ignoring types.
+void ignore(T)(T) {
+}
+
+// TODO: why doesn't this work?
+//void ignore(T)(auto ref T) {}
+
+@("shall ignore the type")
+unittest {
+    static struct A {
+    }
+
+    static struct B {
+    }
+
+    static struct C {
+    }
+
+    SumType!(A, B, C) obj;
+
+    ignore(A.init);
+
+    //You can instantiate it explicitly to ignore a specific type:
+    obj.match!(ignore!A, (B b) {}, (C c) {});
+
+    //// Or you can use it as a catch-all handler:
+    obj.match!((A a) {}, ignore);
+}

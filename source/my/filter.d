@@ -46,7 +46,7 @@ struct ReFilter {
     /**
      * Returns: true if `s` matches `ìncludeRe` and NOT matches any of `excludeRe`.
      */
-    bool match(string s) {
+    bool match(string s, void delegate(string s, string type) @safe logFailed = null) {
         const inclPassed = () {
             if (includeRe.empty)
                 return true;
@@ -56,12 +56,18 @@ struct ReFilter {
             }
             return false;
         }();
-        if (!inclPassed)
+        if (!inclPassed) {
+            if (logFailed !is null)
+                logFailed(s, "include");
             return false;
+        }
 
         foreach (ref re; excludeRe) {
-            if (!matchFirst(s, re).empty)
+            if (!matchFirst(s, re).empty) {
+                if (logFailed !is null)
+                    logFailed(s, "exclude");
                 return false;
+            }
         }
 
         return true;
@@ -115,19 +121,24 @@ struct GlobFilter {
     }
 
     /**
+     * Params:
+     *  logFailed = called when `s` fails matching.
+     *
      * Returns: true if `s` matches `ìncludeRe` and NOT matches any of `excludeRe`.
      */
-    bool match(string s) {
+    bool match(string s, void delegate(string s, string[] filters) @safe logFailed = null) {
         import std.algorithm : canFind;
         import std.path : globMatch;
 
         if (!include.empty && !canFind!((a, b) => globMatch(b, a))(include, s)) {
-            debug logger.tracef("%s did not match any of %s", s, include);
+            if (logFailed !is null)
+                logFailed(s, include);
             return false;
         }
 
         if (canFind!((a, b) => globMatch(b, a))(exclude, s)) {
-            debug logger.tracef("%s did match one of %s", s, exclude);
+            if (logFailed !is null)
+                logFailed(s, exclude);
             return false;
         }
 

@@ -105,6 +105,45 @@ struct TestArea {
     }
 }
 
+/** Execute all classes in the current module as unittests.
+ *
+ * Each class must have the following members and they are executed in this order:
+ *
+ * void setup()
+ * void test()
+ * void shutdown()
+ */
+void runClassAsUnittest(string module_ = __MODULE__)() {
+    import std.traits : hasMember;
+
+    alias Module = mixin(module_);
+
+    static foreach (member; __traits(allMembers, Module)) {
+        {
+            alias MemberT = __traits(getMember, Module, member);
+            static if (is(MemberT == class)) {
+                auto instance = new MemberT;
+                static if (hasMember!(MemberT, "setup"))
+                    instance.setup();
+                instance.test();
+                static if (hasMember!(MemberT, "shutdown"))
+                    instance.shutdown();
+            }
+        }
+    }
+}
+
+@("shall execute all classes as tests")
+unittest {
+    runClassAsUnittest();
+}
+
+private class ATestCase {
+    void test() {
+    }
+}
+
+/// Copy the content of `src``to `dst`.
 void dirContentCopy(Path src, Path dst) {
     import std.algorithm;
     import std.file;
@@ -122,8 +161,10 @@ void dirContentCopy(Path src, Path dst) {
     }
 }
 
+/// Check that `rawRegex` match at least once for the elements of `array`.
 auto regexIn(T)(string rawRegex, T[] array, string file = __FILE__, in size_t line = __LINE__) {
     import std.regex : regex, matchFirst;
+    import unit_threaded.exception : fail;
 
     auto r = regex(rawRegex);
 
@@ -131,8 +172,6 @@ auto regexIn(T)(string rawRegex, T[] array, string file = __FILE__, in size_t li
         if (!matchFirst(v, r).empty)
             return;
     }
-
-    import unit_threaded.exception : fail;
 
     fail(formatValueInItsOwnLine("Value ",
             rawRegex) ~ formatValueInItsOwnLine("not in ", array), file, line);

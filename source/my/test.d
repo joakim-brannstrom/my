@@ -113,21 +113,25 @@ struct TestArea {
  * void test()
  * void shutdown()
  */
-void runClassAsUnittest(string module_ = __MODULE__)() {
+void runClassesAsUnittest(string module_ = __MODULE__)() {
     import std.traits : hasMember;
 
-    alias Module = mixin(module_);
+    mixin("import module1 = " ~ module_ ~ ";");
 
-    static foreach (member; __traits(allMembers, Module)) {
+    static foreach (member; __traits(allMembers, module1)) {
         {
-            alias MemberT = __traits(getMember, Module, member);
+            alias MemberT = __traits(getMember, module1, member);
             static if (is(MemberT == class)) {
                 auto instance = new MemberT;
-                static if (hasMember!(MemberT, "setup"))
-                    instance.setup();
+                static if (hasMember!(MemberT, "setup")) {
+                    static if (__traits(getVisibility, instance.setup) == "public")
+                        instance.setup();
+                }
                 instance.test();
-                static if (hasMember!(MemberT, "shutdown"))
-                    instance.shutdown();
+                static if (hasMember!(MemberT, "shutdown")) {
+                    static if (__traits(getVisibility, instance.shutdown) == "public")
+                        instance.shutdown();
+                }
             }
         }
     }
@@ -135,7 +139,7 @@ void runClassAsUnittest(string module_ = __MODULE__)() {
 
 @("shall execute all classes as tests")
 unittest {
-    runClassAsUnittest();
+    runClassesAsUnittest();
 }
 
 private class ATestCase {

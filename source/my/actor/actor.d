@@ -249,6 +249,7 @@ struct Actor {
     }
 
     invariant () {
+        assert(addr !is null);
         assert(errorHandler_);
         assert(exitHandler_);
         assert(exceptionHandler_);

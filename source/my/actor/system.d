@@ -21,6 +21,7 @@ public import my.actor.actor : Actor, build, makePromise, Promise, scopedActor, 
 public import my.actor.mailbox : Address, AddressPtr, makeAddress;
 public import my.actor.msg;
 import my.actor.common;
+import my.actor.memory : ActorAlloc;
 
 System makeSystem(TaskPool pool) @safe {
     return System(pool, false);
@@ -42,6 +43,8 @@ struct SystemConfig {
 }
 
 struct System {
+    import std.functional : forward;
+
     private {
         bool running;
         bool ownsPool;
@@ -87,23 +90,23 @@ struct System {
     /// spawn dynamic actor.
     AddressPtr spawn(Fn, Args...)(Fn fn, auto ref Args args)
             if (is(Parameters!Fn[0] == Actor*) && is(ReturnType!Fn == Actor*)) {
-        auto actor = new Actor(makeAddress);
-        return schedule(fn(actor, args));
+        auto actor = bg.alloc.make(makeAddress);
+        return schedule(fn(actor, forward!args));
     }
 
     /// spawn typed actor.
     auto spawn(Fn, Args...)(Fn fn, auto ref Args args)
             if (isTypedActorImpl!(Parameters!(Fn)[0])) {
         alias ActorT = TypedActor!(Parameters!(Fn)[0].AllowedMessages);
-        auto actor = new Actor(makeAddress);
-        auto impl = fn(ActorT.Impl(actor), args);
+        auto actor = bg.alloc.make(makeAddress);
+        auto impl = fn(ActorT.Impl(actor), forward!args);
         schedule(actor);
         return impl.address;
     }
 
     // schedule an actor for execution in the thread pool.
     // Returns: the address of the actor.
-    AddressPtr schedule(Actor* actor) @safe {
+    private AddressPtr schedule(Actor* actor) @safe {
         auto addr = actor.address;
         actor.setHomeSystem(&this);
         bg.scheduler.putWaiting(actor);
@@ -203,9 +206,10 @@ private:
 
 struct Backend {
     Scheduler scheduler;
+    ActorAlloc alloc;
 
     void start(TaskPool pool, ulong workers) {
-        scheduler.start(pool, workers);
+        scheduler.start(pool, workers, &alloc);
     }
 
     void shutdown() {
@@ -222,10 +226,14 @@ struct Backend {
  *
  * A worker pop an actor, execute it and then put it back for later scheduling.
  *
- * It is the workers "task" to retrieve work
+ * A watcher monitors inactive actors for either messages to have arrived or
+ * timeouts to trigger. They are then moved back to the waiting queue. The
+ * workers are notified that there are actors waiting to be executed.
  */
 class Scheduler {
     SystemConfig.Scheduler conf;
+
+    ActorAlloc* alloc;
 
     /// Workers will shutdown cleanly if it is false.
     bool isActive;
@@ -401,7 +409,8 @@ class Scheduler {
     }
 
     /// Start the workers.
-    void start(TaskPool pool, const ulong nr) {
+    void start(TaskPool pool, const ulong nr, ActorAlloc* alloc) {
+        this.alloc = alloc;
         foreach (const id; 0 .. nr) {
             auto t = task!worker(this, id);
             workers ~= t;
@@ -437,9 +446,7 @@ class Scheduler {
             waiting.put(a);
         } else {
             // TODO: should terminated actors be logged?
-
-            // lowers the physically reserve memory needed (RES).
-            () @trusted { .destroy(a); }();
+            alloc.dispose(a);
         }
     }
 

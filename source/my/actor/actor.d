@@ -201,7 +201,7 @@ private struct AwaitReponse {
 }
 
 struct Actor {
-    package Address* addr;
+    package RcAddress addr;
     // visible in the package for logging purpose.
     package ActorState state_;
 
@@ -250,14 +250,14 @@ struct Actor {
     }
 
     invariant () {
-        assert(addr !is null);
+        assert(!addr.empty);
         assert(errorHandler_);
         assert(exitHandler_);
         assert(exceptionHandler_);
         assert(defaultHandler_);
     }
 
-    this(Address* a) @trusted {
+    this(RcAddress a) @trusted {
         addr = a;
         addr.setOpen;
         errorHandler_ = toDelegate(&defaultErrorHandler);
@@ -267,12 +267,12 @@ struct Actor {
         defaultHandler_ = toDelegate(&.defaultHandler);
     }
 
-    AddressPtr address() @safe pure nothrow @nogc {
+    AddressPtr address() @safe nothrow @nogc {
         return AddressPtr(addr);
     }
 
-    ref Address addressRef() @safe pure nothrow @nogc {
-        return *addr;
+    ref RcAddress addressRef() @safereturn pure nothrow @nogc {
+        return addr;
     }
 
     ref System homeSystem() @safe pure nothrow @nogc {
@@ -300,7 +300,7 @@ struct Actor {
     }
 
     ulong id() @safe pure nothrow const @nogc {
-        return cast(ulong) addr;
+        return addr.id;
     }
 
     /// Returns: the name of the actor.
@@ -467,7 +467,7 @@ package:
         foreach (a; monitors.byValue) {
             try {
                 if (a.isOpen) {
-                    a.sysMsg.put(SystemMsg(msg));
+                    a.sysMsg.put(SystemMsg(new DownMsg(msg)));
                 }
             } catch (Exception e) {
             }

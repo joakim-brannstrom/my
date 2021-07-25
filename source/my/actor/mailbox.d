@@ -12,6 +12,7 @@ import std.variant : Variant;
 import sumtype;
 
 import my.actor.common;
+import my.gc.refc;
 public import my.actor.system_msg;
 
 @safe:
@@ -44,6 +45,7 @@ struct Address {
     private {
         // If the actor that use the address is active and processing messages.
         bool open_;
+        ulong id_;
     }
 
     Queue!Msg incoming;
@@ -57,10 +59,17 @@ struct Address {
     Queue!Reply replies;
 
     private this(Mutex mtx) {
+        // lazy way of generating an ID. a mutex is a class thus allocated on
+        // the heap at a unique location. just... use the pointer as the ID.
+        id_ = cast(ulong) mtx;
         incoming = typeof(incoming)(mtx);
         sysMsg = typeof(sysMsg)(mtx);
         delayed = typeof(delayed)(mtx);
         replies = typeof(replies)(mtx);
+    }
+
+    ulong id() @safe pure nothrow const @nogc {
+        return id_;
     }
 
     bool hasMessage() @safe pure nothrow const @nogc {
@@ -80,28 +89,50 @@ struct Address {
     }
 }
 
+/// Keep track of the pointer to allow detecting when it is only the actor itself that is referesing it.
+struct RcAddress {
+    RefCounted!(Address*) addr;
+
+    alias safeGet this;
+
+    private this(Address* addr) {
+        this.addr = refCounted(addr);
+    }
+
+    package Address* unsafeGet() @system pure nothrow const @nogc scope return  {
+        return addr.get;
+    }
+
+    ref Address safeGet() @safe pure nothrow const @nogc scope return  {
+        return *addr.get;
+    }
+
+    void opAssign(RcAddress rhs) @safe nothrow @nogc {
+        this.addr = rhs.addr;
+    }
+}
+
 /// Convenient type for wrapping a pointer and then used in APIs
 struct AddressPtr {
-    private Address* ptr_;
+    private RcAddress ptr_;
 
-    this(Address* a) @safe pure nothrow @nogc {
+    this(RcAddress a) @safe pure nothrow @nogc {
         this.ptr_ = a;
     }
 
-    void opAssign(const AddressPtr rhs) @trusted pure nothrow @nogc {
-        // addresses can always be sent to. remove transitive const.
-        this.ptr_ = cast(Address*) rhs.ptr_;
+    void opAssign(AddressPtr rhs) @safe nothrow @nogc {
+        this.ptr_ = rhs.ptr_;
     }
 
-    Address* ptr() @safe pure nothrow @nogc {
+    RcAddress ptr() @safe pure nothrow @nogc {
         return ptr_;
     }
 
     ref Address opCall() @safe pure nothrow @nogc scope return  {
-        return *ptr_;
+        return ptr_.get;
     }
 }
 
-Address* makeAddress() {
-    return new Address(new Mutex);
+RcAddress makeAddress() {
+    return RcAddress(new Address(new Mutex));
 }

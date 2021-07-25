@@ -1300,6 +1300,16 @@ struct ScopedActor {
     private static struct SRequestSendThen {
         RequestSendThen rs;
 
+        uint backoff;
+        void dynIntervalSleep() @trusted {
+            // +100 usecs "feels good", magic number. current OS and
+            // implementation of message passing isn't that much faster than
+            // 100us. A bit slow behavior, ehum, for a scoped actor is OK. They
+            // aren't expected to be used for "time critical" sections.
+            Thread.sleep(backoff.dur!"usecs");
+            backoff = min(backoff + 100, 20000);
+        }
+
         void then(T)(T handler, ErrorHandler onError = null) {
             () @trusted { .thenUnsafe!(T, void)(rs, handler, null, onError); }();
 
@@ -1309,7 +1319,7 @@ struct ScopedActor {
                 rs.rs.self.process(Clock.currTime);
                 // force the actor to be alive even though there are no behaviors.
                 rs.rs.self.state_ = ActorState.waiting;
-                () @trusted { Thread.sleep(20.dur!"msecs"); }();
+                dynIntervalSleep;
             }
             while (rs.rs.self.messages == 0);
         }

@@ -569,11 +569,12 @@ package:
             front.match!((ref DownMsg a) {
                 if (downHandler_)
                     downHandler_(this, a);
-            }, (ref MonitorRequest a) { monitors[cast(void*) a.addr] = a.addr; }, (ref LinkRequest a) {
+            }, (ref MonitorRequest a) { monitors[cast(void*) a.addr] = a.addr; },
+                    (ref DemonitorRequest a) { monitors.remove(a.addr); }, (ref LinkRequest a) {
                 links[cast(void*) a.addr] = a.addr;
-            }, (ref ErrorMsg a) { errorHandler_(this, a); }, (ref ExitMsg a) {
-                exitHandler_(this, a);
-            }, (ref SystemExitMsg a) {
+            }, (ref UnlinkRequest a) { links.remove(a.addr); }, (ref ErrorMsg a) {
+                errorHandler_(this, a);
+            }, (ref ExitMsg a) { exitHandler_(this, a); }, (ref SystemExitMsg a) {
                 final switch (a.reason) {
                 case ExitReason.normal:
                     break;

@@ -54,6 +54,19 @@ void linkTo(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     sendSystemMsg(addr, LinkRequest(self_.ptr));
 }
 
+/// Remove the link between `self` and the actor using `sendTo`.
+void unlinkTo(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
+        if ((isActor!AddressT0 || isAddress!AddressT0) && (isActor!AddressT1
+            || isAddress!AddressT1)) {
+    import my.actor.mailbox : UnlinkRequest;
+
+    auto self_ = underlyingAddress(self);
+    auto addr = underlyingAddress(sendTo);
+
+    sendSystemMsg(self_, UnlinkRequest(addr.ptr));
+    sendSystemMsg(addr, UnlinkRequest(self_.ptr));
+}
+
 /** Actor `self` will receive a `DownMsg` when `sendTo` shutdown.
  *
  * `DownMsg` triggers `downHandler`.
@@ -67,6 +80,18 @@ void monitor(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     auto addr = underlyingAddress(sendTo);
 
     sendSystemMsg(addr, MonitorRequest(self_.ptr));
+}
+
+/// Remove `self` as a monitor of the actor using `sendTo`.
+void demonitor(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
+        if ((isActor!AddressT0 || isAddress!AddressT0) && (isActor!AddressT1
+            || isAddress!AddressT1)) {
+    import my.actor.system_msg : MonitorRequest;
+
+    auto self_ = underlyingAddress(self);
+    auto addr = underlyingAddress(sendTo);
+
+    sendSystemMsg(addr, DemonitorRequest(self_.ptr));
 }
 
 // Only send the message if the system message queue is empty.

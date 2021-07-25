@@ -6,6 +6,7 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 module my.actor.actor;
 
 import core.thread : Thread;
+import logger = std.experimental.logger;
 import std.algorithm : schwartzSort, max, min, among;
 import std.array : empty;
 import std.datetime : SysTime, Clock, dur;
@@ -1270,36 +1271,95 @@ unittest {
     assert(calledReply == 2);
 }
 
+/// The timeout triggered.
+class ScopedActorException : Exception {
+    this(ScopedActorError err, string file = __FILE__, int line = __LINE__) @safe pure nothrow {
+        super(null, file, line);
+        error = err;
+    }
+
+    ScopedActorError error;
+}
+
+enum ScopedActorError : ubyte {
+    none,
+    // actor address is down
+    down,
+    // request timeout
+    timeout,
+    // the address where unable to process the received message
+    unknownMsg,
+    // some type of fatal error occured.
+    fatal,
+}
+
 /** Intended to be used in a local scope by a user.
  *
  */
 struct ScopedActor {
     import my.actor.typed : underlyingAddress;
 
-    private Actor actor;
+    private {
+        static struct Data {
+            Actor self;
+            ScopedActorError errSt;
+        }
+
+        RefCounted!Data data;
+    }
+
+    this(Address* addr) @safe {
+        data = refCounted(Data(Actor(addr), ScopedActorError.none));
+        data.self.name = "ScopedActor";
+    }
 
     ~this() @safe {
-        actor.shutdown;
-        while (actor.isAlive)
-            actor.process(Clock.currTime);
+        if (data.refCount == 1) {
+            data.self.shutdown;
+            while (data.self.isAlive)
+                data.self.process(Clock.currTime);
+        }
+    }
+
+    private void reset() @safe nothrow {
+        data.errSt = ScopedActorError.none;
+    }
+
+    private void downHandler(ref Actor, DownMsg) @safe nothrow {
+        data.errSt = ScopedActorError.down;
+    }
+
+    private void errorHandler(ref Actor, ErrorMsg msg) @safe nothrow {
+        if (msg.reason == SystemError.requestTimeout)
+            data.errSt = ScopedActorError.timeout;
+        else
+            data.errSt = ScopedActorError.fatal;
+    }
+
+    private void unknownMsgHandler(ref Actor a, ref Variant msg) @safe nothrow {
+        logAndDropHandler(a, msg);
+        data.errSt = ScopedActorError.unknownMsg;
     }
 
     SRequestSend request(TAddress)(TAddress requestTo, SysTime timeout) {
+        reset;
         auto addr = underlyingAddress(requestTo);
-        auto rs = .request(&actor, addr, timeout);
-        return SRequestSend(rs);
+        auto rs = .request(&data.self, addr, timeout);
+        return SRequestSend(rs, this);
     }
 
     private static struct SRequestSend {
         RequestSend rs;
+        ScopedActor self;
 
         SRequestSendThen send(Args...)(auto ref Args args) {
-            return SRequestSendThen(.send(rs, args));
+            return SRequestSendThen(.send(rs, args), self);
         }
     }
 
     private static struct SRequestSendThen {
         RequestSendThen rs;
+        ScopedActor self;
 
         uint backoff;
         void dynIntervalSleep() @trusted {
@@ -1312,7 +1372,15 @@ struct ScopedActor {
         }
 
         void then(T)(T handler, ErrorHandler onError = null) {
+            scope (exit)
+                demonitor(rs.rs.self, rs.rs.requestTo);
+            monitor(rs.rs.self, rs.rs.requestTo);
+
             () @trusted { .thenUnsafe!(T, void)(rs, handler, null, onError); }();
+
+            self.data.self.downHandler = &self.downHandler;
+            self.data.self.defaultHandler = &self.unknownMsgHandler;
+            self.data.self.errorHandler = &self.errorHandler;
 
             // TODO: this loop is stupid... should use a conditional variable
             // instead but that requires changing the mailbox. later
@@ -1320,7 +1388,15 @@ struct ScopedActor {
                 rs.rs.self.process(Clock.currTime);
                 // force the actor to be alive even though there are no behaviors.
                 rs.rs.self.state_ = ActorState.waiting;
-                dynIntervalSleep;
+
+                if (self.data.errSt == ScopedActorError.none) {
+                    dynIntervalSleep;
+                    if (!rs.rs.requestTo.ptr.isOpen) {
+                        self.data.errSt = ScopedActorError.down;
+                    }
+                } else {
+                    throw new ScopedActorException(self.data.errSt);
+                }
             }
             while (rs.rs.self.messages == 0);
         }
@@ -1328,5 +1404,54 @@ struct ScopedActor {
 }
 
 ScopedActor scopedActor() @safe {
-    return ScopedActor(Actor(makeAddress));
+    return ScopedActor(makeAddress);
+}
+
+@(
+        "scoped actor shall throw an exception if the actor that is sent a request terminates or is closed")
+unittest {
+    import my.actor.system;
+
+    auto sys = makeSystem;
+
+    auto a0 = sys.spawn((Actor* self) {
+        return impl(self, (ref CSelf!() ctx, int x) {
+            Thread.sleep(50.dur!"msecs");
+            return 42;
+        }, capture(self), (ref CSelf!() ctx, double x) {}, capture(self),
+            (ref CSelf!() ctx, string x) { ctx.self.shutdown; return 42; }, capture(self));
+    });
+
+    {
+        auto self = scopedActor;
+        bool excThrown;
+        auto stopAt = Clock.currTime + 1.dur!"seconds";
+        while (!excThrown && Clock.currTime < stopAt) {
+            try {
+                self.request(a0, delay(1.dur!"nsecs")).send(42).then((int x) {});
+            } catch (ScopedActorException e) {
+                excThrown = e.error == ScopedActorError.timeout;
+            } catch (Exception e) {
+                logger.info(e.msg);
+            }
+        }
+        assert(excThrown, "timeout did not trigger as expected");
+    }
+
+    {
+        auto self = scopedActor;
+        bool excThrown;
+        auto stopAt = Clock.currTime + 100.dur!"msecs";
+        while (!excThrown && Clock.currTime < stopAt) {
+            try {
+                self.request(a0, delay(1.dur!"seconds")).send("hello").then((int x) {
+                });
+            } catch (ScopedActorException e) {
+                excThrown = e.error == ScopedActorError.down;
+            } catch (Exception e) {
+                logger.info(e.msg);
+            }
+        }
+        assert(excThrown, "detecting terminated actor did not trigger as expected");
+    }
 }

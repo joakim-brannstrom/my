@@ -40,12 +40,22 @@ struct ErrorMsg {
     SystemError reason;
 }
 
-// Incoming requests to link `monitor` to the actor using this address.
+// Incoming requests to link to the actor using this address.
 struct MonitorRequest {
     Address* addr;
 }
 
-// Incoming requests to link `monitor` to the actor using this address.
+// Request to remove `addr` as a monitor.
+struct DemonitorRequest {
+    Address* addr;
+}
+
+// Incoming requests to link to the actor using this address.
 struct LinkRequest {
+    Address* addr;
+}
+
+// Request to remove `addr` as a link.
+struct UnlinkRequest {
     Address* addr;
 }

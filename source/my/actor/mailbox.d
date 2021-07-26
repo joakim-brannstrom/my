@@ -27,7 +27,8 @@ enum MsgType {
     request,
 }
 
-alias SystemMsg = SumType!(ErrorMsg, DownMsg, ExitMsg, SystemExitMsg, MonitorRequest, LinkRequest);
+alias SystemMsg = SumType!(ErrorMsg, DownMsg, ExitMsg, SystemExitMsg,
+        MonitorRequest, DemonitorRequest, LinkRequest, UnlinkRequest);
 
 struct Reply {
     ulong id;

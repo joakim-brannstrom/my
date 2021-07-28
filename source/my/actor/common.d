@@ -15,17 +15,20 @@ struct Queue(T) {
     private {
         Mutex mtx;
         T[] data;
+        bool open;
     }
 
     @disable this(this);
 
     this(Mutex mtx) {
         this.mtx = mtx;
+        this.open = true;
     }
 
     void put(T a) @trusted scope {
         synchronized (mtx) {
-            data ~= a;
+            if (open)
+                data ~= a;
         }
     }
 
@@ -46,6 +49,16 @@ struct Queue(T) {
 
     bool empty() @safe pure nothrow const @nogc {
         return data.length == 0;
+    }
+
+    /// clear the queue and permanently shut it down by rejecting put messages.
+    void teardown() @trusted {
+        synchronized (mtx) {
+            foreach (ref a; data)
+                a = T.init;
+            open = false;
+            data = null;
+        }
     }
 }
 

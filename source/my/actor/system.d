@@ -18,7 +18,7 @@ import my.optional;
 
 public import my.actor.typed;
 public import my.actor.actor : Actor, build, makePromise, Promise, scopedActor, impl;
-public import my.actor.mailbox : Address, AddressPtr, makeAddress;
+public import my.actor.mailbox : Address, RcAddress, makeAddress;
 public import my.actor.msg;
 import my.actor.common;
 import my.actor.memory : ActorAlloc;
@@ -88,7 +88,7 @@ struct System {
     }
 
     /// spawn dynamic actor.
-    AddressPtr spawn(Fn, Args...)(Fn fn, auto ref Args args)
+    RcAddress spawn(Fn, Args...)(Fn fn, auto ref Args args)
             if (is(Parameters!Fn[0] == Actor*) && is(ReturnType!Fn == Actor*)) {
         auto actor = bg.alloc.make(makeAddress);
         return schedule(fn(actor, forward!args));
@@ -106,7 +106,7 @@ struct System {
 
     // schedule an actor for execution in the thread pool.
     // Returns: the address of the actor.
-    private AddressPtr schedule(Actor* actor) @safe {
+    private RcAddress schedule(Actor* actor) @safe {
         auto addr = actor.address;
         actor.setHomeSystem(&this);
         bg.scheduler.putWaiting(actor);
@@ -218,7 +218,10 @@ struct Backend {
 
         scheduler.shutdown;
         scheduler = null;
-        () @trusted { .destroy(scheduler); GC.collect; malloc_trim(0); }();
+        //() @trusted { .destroy(scheduler); GC.collect; malloc_trim(0); }();
+        () @trusted { .destroy(scheduler); }();
+        () @trusted { GC.collect; }();
+        () @trusted { malloc_trim(0); }();
     }
 }
 

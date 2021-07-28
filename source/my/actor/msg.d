@@ -34,7 +34,7 @@ SysTime timeout(Duration d) @safe nothrow {
 alias delay = timeout;
 
 enum isActor(T) = is(T == Actor*) || isTypedActor!T || isTypedActorImpl!T;
-enum isAddress(T) = is(T == AddressPtr) || isTypedAddress!T;
+enum isAddress(T) = is(T == RcAddress) || isTypedAddress!T;
 
 /** Link the lifetime of `self` to the actor using `sendTo`.
  *
@@ -50,8 +50,8 @@ void linkTo(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     auto self_ = underlyingAddress(self);
     auto addr = underlyingAddress(sendTo);
 
-    sendSystemMsg(self_, LinkRequest(addr.ptr));
-    sendSystemMsg(addr, LinkRequest(self_.ptr));
+    sendSystemMsg(self_, LinkRequest(addr));
+    sendSystemMsg(addr, LinkRequest(self_));
 }
 
 /// Remove the link between `self` and the actor using `sendTo`.
@@ -63,8 +63,8 @@ void unlinkTo(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     auto self_ = underlyingAddress(self);
     auto addr = underlyingAddress(sendTo);
 
-    sendSystemMsg(self_, UnlinkRequest(addr.ptr));
-    sendSystemMsg(addr, UnlinkRequest(self_.ptr));
+    sendSystemMsg(self_, UnlinkRequest(addr));
+    sendSystemMsg(addr, UnlinkRequest(self_));
 }
 
 /** Actor `self` will receive a `DownMsg` when `sendTo` shutdown.
@@ -79,7 +79,7 @@ void monitor(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     auto self_ = underlyingAddress(self);
     auto addr = underlyingAddress(sendTo);
 
-    sendSystemMsg(addr, MonitorRequest(self_.ptr));
+    sendSystemMsg(addr, MonitorRequest(self_));
 }
 
 /// Remove `self` as a monitor of the actor using `sendTo`.
@@ -91,23 +91,23 @@ void demonitor(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     auto self_ = underlyingAddress(self);
     auto addr = underlyingAddress(sendTo);
 
-    sendSystemMsg(addr, DemonitorRequest(self_.ptr));
+    sendSystemMsg(addr, DemonitorRequest(self_));
 }
 
 // Only send the message if the system message queue is empty.
-package void sendSystemMsgIfEmpty(T)(scope AddressPtr sendTo, T msg) @safe {
+package void sendSystemMsgIfEmpty(T)(RcAddress sendTo, T msg) @safe {
     if (sendTo().isOpen && sendTo().sysMsg.empty)
         sendTo().sysMsg.put(SystemMsg(msg));
 }
 
-package void sendSystemMsg(T)(scope AddressPtr sendTo, T msg) @safe {
+package void sendSystemMsg(T)(RcAddress sendTo, T msg) @safe {
     if (sendTo().isOpen)
         sendTo().sysMsg.put(SystemMsg(msg));
 }
 
 /// Trigger the message in the future.
-void delayedSend(AddressT, Args...)(scope AddressT sendTo, SysTime delayTo, auto ref Args args) @trusted
-        if (is(AddressT == AddressPtr) || is(AddressT == Actor*)) {
+void delayedSend(AddressT, Args...)(AddressT sendTo, SysTime delayTo, auto ref Args args) @trusted
+        if (is(AddressT == RcAddress) || is(AddressT == Actor*)) {
     alias UArgs = staticMap!(Unqual, Args);
     auto addr = underlyingAddress(sendTo);
     if (addr().isOpen)
@@ -115,15 +115,15 @@ void delayedSend(AddressT, Args...)(scope AddressT sendTo, SysTime delayTo, auto
                 makeSignature!UArgs, Variant(Tuple!UArgs(args))), delayTo));
 }
 
-void sendExit(scope AddressPtr sendTo, const ExitReason reason) @safe {
+void sendExit(RcAddress sendTo, const ExitReason reason) @safe {
     import my.actor.system_msg : SystemExitMsg;
 
     sendSystemMsg(sendTo, SystemExitMsg(reason));
 }
 
 // TODO: add verification that args do not have interior pointers
-void send(AddressT, Args...)(scope AddressT sendTo, auto ref Args args) @trusted
-        if (is(AddressT == AddressPtr) || is(AddressT == Actor*)) {
+void send(AddressT, Args...)(AddressT sendTo, auto ref Args args) @trusted
+        if (is(AddressT == RcAddress) || is(AddressT == Actor*)) {
     alias UArgs = staticMap!(Unqual, Args);
     auto addr = underlyingAddress(sendTo);
     if (addr().isOpen)
@@ -133,7 +133,7 @@ void send(AddressT, Args...)(scope AddressT sendTo, auto ref Args args) @trusted
 
 package struct RequestSend {
     Actor* self;
-    AddressPtr requestTo;
+    RcAddress requestTo;
     SysTime timeout;
     ulong replyId;
 }
@@ -143,7 +143,7 @@ package struct RequestSendThen {
     Msg msg;
 }
 
-RequestSend request(ActorT)(ActorT self, AddressPtr requestTo, SysTime timeout)
+RequestSend request(ActorT)(ActorT self, RcAddress requestTo, SysTime timeout)
         if (is(ActorT == Actor*)) {
     return RequestSend(self, requestTo, timeout, self.replyId);
 }
@@ -156,7 +156,7 @@ RequestSendThen send(Args...)(RequestSend r, auto ref Args args) {
         MsgType.request,
         makeSignature!UArgs,
         () @trusted {
-        return Variant(Tuple!(ulong, Address*, Variant)(r.replyId, r.self.addr, Variant(Tuple!UArgs(args))));
+        return Variant(Tuple!(ulong, RcAddress, Variant)(r.replyId, r.self.addr, Variant(Tuple!UArgs(args))));
         }()
     );
     // dfmt on
@@ -183,9 +183,8 @@ private struct ThenContext(Captures...) {
 package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
         void* ctx, ErrorHandler onError = null) @trusted {
     if (!r.rs.requestTo().isOpen) {
-        // TODO: should the address in ErrorMsg be requestTo? probably
         if (onError)
-            onError(*r.rs.self, ErrorMsg(null, SystemError.requestReceiverDown));
+            onError(*r.rs.self, ErrorMsg(r.rs.requestTo, SystemError.requestReceiverDown));
         return;
     }
 
@@ -227,8 +226,8 @@ private struct TypedRequestSend(TAddress) {
     RequestSend rs;
 }
 
-TypedRequestSend!TAddress request(TActor, TAddress)(ref TActor self,
-        scope TAddress sendTo, SysTime timeout)
+TypedRequestSend!TAddress request(TActor, TAddress)(ref TActor self, TAddress sendTo,
+        SysTime timeout)
         if (isActor!TActor && (isTypedActorImpl!TAddress || isTypedAddress!TAddress)) {
     return typeof(return)(request(underlyingActor(self), underlyingAddress(sendTo), timeout));
 }

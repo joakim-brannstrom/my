@@ -10,7 +10,7 @@ module my.actor.memory;
 import core.sync.mutex : Mutex;
 
 import my.actor.actor : Actor;
-import my.actor.mailbox : Address, makeAddress;
+import my.actor.mailbox : RcAddress, makeAddress;
 
 import std.stdio;
 
@@ -28,7 +28,7 @@ struct ActorAlloc {
 
     enum Sz = Actor.sizeof;
 
-    Actor* make(Address* addr) @trusted {
+    Actor* make(RcAddress addr) @trusted {
         import std.experimental.allocator : make;
 
         auto rval = make!Actor(allocator_, addr);

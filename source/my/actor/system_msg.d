@@ -47,7 +47,7 @@ struct MonitorRequest {
 
 // Request to remove `addr` as a monitor.
 struct DemonitorRequest {
-    Address* addr;
+    RcAddress addr;
 }
 
 // Incoming requests to link to the actor using this address.
@@ -57,5 +57,5 @@ struct LinkRequest {
 
 // Request to remove `addr` as a link.
 struct UnlinkRequest {
-    Address* addr;
+    RcAddress addr;
 }

@@ -110,10 +110,10 @@ unittest {
     static struct Tick {
     }
 
-    AddressPtr[] senders;
+    RcAddress[] senders;
     foreach (_; 0 .. 100) {
         static struct State {
-            AddressPtr recv;
+            RcAddress recv;
             FlowControlActor.Address limiter;
         }
 
@@ -121,10 +121,10 @@ unittest {
         }
 
         senders ~= sys.spawn((Actor* self) {
-            auto st = tuple!("self", "state")(self, refCounted(State(AddressPtr.init, limiter)));
+            auto st = tuple!("self", "state")(self, refCounted(State(RcAddress.init, limiter)));
             alias CT = typeof(st);
 
-            return build(self).set((ref CT ctx, AddressPtr recv) {
+            return build(self).set((ref CT ctx, RcAddress recv) {
                 ctx.state.recv = recv;
                 send(ctx.self.address, Tick.init);
             }, capture(st)).set((ref CT ctx, Tick _) {

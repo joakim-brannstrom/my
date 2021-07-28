@@ -13,7 +13,7 @@ import std.typecons : Tuple, tuple;
 import my.actor.actor : Actor, ErrorHandler, DownHandler, ExitHandler,
     ExceptionHandler, DefaultHandler;
 import my.actor.common : makeSignature;
-import my.actor.mailbox : AddressPtr, Address, Msg, MsgType, makeAddress;
+import my.actor.mailbox : RcAddress, Address, Msg, MsgType, makeAddress;
 import my.actor.msg;
 import my.actor.system : System;
 
@@ -81,7 +81,7 @@ struct TypedActorImpl(AllowedMsg...) {
         actor.defaultHandler = v;
     }
 
-    TypedAddress!AllowedMessages address() @safe pure nothrow @nogc {
+    TypedAddress!AllowedMessages address() @safe nothrow @nogc {
         return TypedAddress!AllowedMessages(actor.address);
     }
 
@@ -94,13 +94,13 @@ struct TypedActorImpl(AllowedMsg...) {
 struct TypedAddress(AllowedMsg...) {
     alias AllowedMessages = AliasSeq!AllowedMsg;
     package {
-        AddressPtr address;
+        RcAddress address;
 
-        this(AddressPtr a) {
+        this(RcAddress a) {
             address = a;
         }
 
-        ref Address opCall() {
+        ref inout(Address) opCall() inout {
             return address();
         }
     }
@@ -281,8 +281,9 @@ unittest {
         return (*c.called)++;
     }
 
-    auto actor = impl(MyActor.Impl(new Actor(makeAddress)), &fn1,
-            capture(&called), (ref Capture!(int*, "called") ctx, int, double) {
+    auto aa1 = Actor(makeAddress);
+    auto actor = impl(MyActor.Impl(&aa1), &fn1, capture(&called),
+            (ref Capture!(int*, "called") ctx, int, double) {
         (*ctx.called)++;
         return tuple("hej", 42);
     }, capture(&called));
@@ -317,7 +318,7 @@ unittest {
 }
 
 @("shall construct a typed actor and process two messages")
-@safe unittest {
+unittest {
     alias MyActor = typedActor!(void delegate(int), void delegate(int, double));
 
     int called;
@@ -325,10 +326,9 @@ unittest {
         (*c.called)++;
     }
 
-    auto actor = impl(MyActor.Impl(new Actor(makeAddress)), &fn1,
-            capture(&called), (ref Capture!(int*, "called") c, int, double) {
-        (*c.called)++;
-    }, capture(&called));
+    auto aa1 = Actor(makeAddress);
+    auto actor = impl(MyActor.Impl(&aa1), &fn1, capture(&called),
+            (ref Capture!(int*, "called") c, int, double) { (*c.called)++; }, capture(&called));
 
     send(actor.address, 42);
     send(actor, 42, 43.0);
@@ -367,8 +367,8 @@ unittest {
             ToTypedMsg!(string delegate(int), false)));
 }
 
-package AddressPtr underlyingAddress(T)(T address)
-        if (is(T == Actor*) || is(T == AddressPtr) || isTypedAddress!T || isTypedActorImpl!T) {
+package RcAddress underlyingAddress(T)(T address)
+        if (is(T == Actor*) || is(T == RcAddress) || isTypedAddress!T || isTypedActorImpl!T) {
     static if (isTypedAddress!T)
         return address.address;
     else static if (isTypedActorImpl!T)

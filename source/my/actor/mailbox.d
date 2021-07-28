@@ -48,88 +48,145 @@ struct Address {
         ulong id_;
     }
 
-    Queue!Msg incoming;
+    package {
+        Queue!Msg incoming;
 
-    Queue!SystemMsg sysMsg;
+        Queue!SystemMsg sysMsg;
 
-    // Delayed messages for this actor that will be triggered in the future.
-    Queue!DelayedMsg delayed;
+        // Delayed messages for this actor that will be triggered in the future.
+        Queue!DelayedMsg delayed;
 
-    // Incoming replies on requests.
-    Queue!Reply replies;
+        // Incoming replies on requests.
+        Queue!Reply replies;
+    }
 
-    private this(Mutex mtx) {
+    private this(Mutex mtx)
+    in (mtx !is null) {
         // lazy way of generating an ID. a mutex is a class thus allocated on
         // the heap at a unique location. just... use the pointer as the ID.
-        id_ = cast(ulong) mtx;
+        () @trusted { id_ = cast(ulong) cast(void*) mtx; }();
         incoming = typeof(incoming)(mtx);
         sysMsg = typeof(sysMsg)(mtx);
         delayed = typeof(delayed)(mtx);
         replies = typeof(replies)(mtx);
     }
 
-    ulong id() @safe pure nothrow const @nogc {
-        return id_;
+    @disable this(this);
+
+    size_t toHash() @safe pure nothrow const @nogc scope {
+        return id_.hashOf();
     }
 
-    bool hasMessage() @safe pure nothrow const @nogc {
-        return !(incoming.empty && sysMsg.empty && delayed.empty && replies.empty);
+    void shutdown() @safe nothrow {
+        try {
+            incoming.teardown;
+            sysMsg.teardown;
+            delayed.teardown;
+            replies.teardown;
+        } catch (Exception e) {
+            assert(0, "this should never happen");
+        }
+    }
+
+    /// Globally unique ID for the address.
+    ulong id() @safe pure nothrow const @nogc {
+        return id_;
     }
 
     bool isOpen() @safe pure nothrow const @nogc scope {
         return open_;
     }
 
-    void setOpen() @safe pure nothrow @nogc {
+    package bool hasMessage() @safe pure nothrow const @nogc {
+        return !(incoming.empty && sysMsg.empty && delayed.empty && replies.empty);
+    }
+
+    package void setOpen() @safe pure nothrow @nogc {
         open_ = true;
     }
 
-    void setClosed() @safe pure nothrow @nogc {
+    package void setClosed() @safe pure nothrow @nogc {
         open_ = false;
     }
 }
 
 /// Keep track of the pointer to allow detecting when it is only the actor itself that is referesing it.
 struct RcAddress {
-    RefCounted!(Address*) addr;
+    package {
+        RefCounted!(Address*) addr;
+    }
 
     alias safeGet this;
 
     private this(Address* addr) {
         this.addr = refCounted(addr);
+        import core.stdc.stdio : printf;
+
+        () @trusted { printf("a %lx %d\n", cast(ulong) addr, this.addr.refCount); }();
     }
 
-    package Address* unsafeGet() @system pure nothrow const @nogc scope return  {
-        return addr.get;
+    ~this() @safe nothrow @nogc {
+        import core.memory : GC;
+
+        // this lead to hard to track down errors because a breakpoint has to
+        // be set for _d_throwdwarf. But the alternative is worse because it
+        // could lead to "dangling" addresses and in the longer run dangling
+        // actors. Actors that are never shutdown because they are not detected
+        // as "unreachable".
+        if (!empty) {
+            import core.stdc.stdio : printf;
+
+            () @trusted {
+                printf("b %lx %d %d\n", cast(ulong) addr.get, addr.refCount, GC.inFinalizer);
+            }();
+            //assert(!GC.inFinalizer, "Error: clean-up of RcAddress incorrectly" ~
+            //       " depends on destructors called by the GC.");
+        }
     }
 
-    ref Address safeGet() @safe pure nothrow const @nogc scope return  {
-        return *addr.get;
+    package void release() @safe nothrow @nogc {
+        addr.release;
+
+        import core.stdc.stdio : printf;
+
+        () @trusted {
+            if (!empty)
+                printf("c %lx %d\n", cast(ulong) addr, this.addr.refCount);
+        }();
+    }
+
+    ulong id() @safe pure nothrow const @nogc {
+        return cast(ulong) addr.get;
+    }
+
+    size_t toHash() @safe pure nothrow const @nogc scope {
+        return cast(size_t) addr.get;
     }
 
     void opAssign(RcAddress rhs) @safe nothrow @nogc {
+        import core.stdc.stdio : printf;
+
+        () @trusted {
+            if (!empty)
+                printf("d %lx %d\n", cast(ulong) addr, this.addr.refCount);
+        }();
         this.addr = rhs.addr;
     }
-}
 
-/// Convenient type for wrapping a pointer and then used in APIs
-struct AddressPtr {
-    private RcAddress ptr_;
-
-    this(RcAddress a) @safe pure nothrow @nogc {
-        this.ptr_ = a;
+    bool empty() @safe pure nothrow const @nogc {
+        return addr.empty;
     }
 
-    void opAssign(AddressPtr rhs) @safe nothrow @nogc {
-        this.ptr_ = rhs.ptr_;
+    package Address* unsafeGet() @system pure nothrow @nogc scope return  {
+        return addr.get;
     }
 
-    RcAddress ptr() @safe pure nothrow @nogc {
-        return ptr_;
+    ref inout(Address) safeGet() inout @safe pure nothrow @nogc scope return  {
+        return *addr.get;
     }
 
-    ref Address opCall() @safe pure nothrow @nogc scope return  {
-        return ptr_.get;
+    ref inout(Address) opCall() inout @safe pure nothrow @nogc scope return  {
+        return safeGet;
     }
 }
 

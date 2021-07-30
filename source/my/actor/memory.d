@@ -8,9 +8,11 @@ Allocators used by system.
 module my.actor.memory;
 
 import core.sync.mutex : Mutex;
+import logger = std.experimental.logger;
+import std.datetime : Clock;
 
-import my.actor.actor : Actor;
-import my.actor.mailbox : RcAddress, makeAddress;
+import my.actor.actor : Actor, ActorState;
+import my.actor.mailbox : StrongAddress, makeAddress2;
 
 import std.stdio;
 
@@ -28,7 +30,7 @@ struct ActorAlloc {
 
     enum Sz = Actor.sizeof;
 
-    Actor* make(RcAddress addr) @trusted {
+    Actor* make(StrongAddress addr) @trusted {
         import std.experimental.allocator : make;
 
         auto rval = make!Actor(allocator_, addr);
@@ -37,11 +39,11 @@ struct ActorAlloc {
         return rval;
     }
 
-    void dispose(Actor* a) @trusted {
+    void dispose(Actor* a) @trusted
+    in (a.state_ == ActorState.stopped, "actors must be stopped before disposed") {
         static import my.alloc.dispose_;
 
         my.alloc.dispose_.dispose(allocator_, a);
-
         GC.removeRange(a);
     }
 }
@@ -49,10 +51,27 @@ struct ActorAlloc {
 @("shall allocate and dellacate an actor")
 unittest {
     import core.memory : GC;
+    import std.variant;
+    import std.typecons;
+    import my.actor.mailbox;
 
     ActorAlloc aa;
-    foreach (_; 0 .. 10) {
-        auto a = aa.make(makeAddress);
+    foreach (_1; 0 .. 10) {
+        auto addr = makeAddress2;
+        auto a = aa.make(addr);
+
+        // adding a StrongAddress is normally blocked by the user BUT the
+        // teardown of messages should release it such that it is no longer on
+        // the GC.
+        addr.put!Msg(Msg(MsgType.oneShot, 42, Variant(tuple(addr))));
+
+        foreach (_2; 0 .. 5)
+            a.process(Clock.currTime);
+
+        a.shutdown;
+        while (a.isAlive)
+            a.process(Clock.currTime);
+
         aa.dispose(a);
         GC.collect;
     }

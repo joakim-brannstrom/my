@@ -17,8 +17,9 @@ import my.actor.common : ExitReason, makeSignature, SystemError;
 import my.actor.actor : Actor, makeAction, makeRequest, makeReply, makePromise,
     ErrorHandler, Promise, RequestResult;
 import my.actor.system_msg;
-import my.actor.typed : isTypedAddress, isTypedActor, isTypedActorImpl, typeCheckMsg, ParamsToTuple,
-    ReturnToTupleOrVoid, underlyingActor, underlyingAddress, underlyingTypedAddress;
+import my.actor.typed : isTypedAddress, isTypedActor, isTypedActorImpl,
+    typeCheckMsg, ParamsToTuple, ReturnToTupleOrVoid,
+    underlyingActor, underlyingAddress, underlyingTypedAddress, underlyingWeakAddress;
 
 SysTime infTimeout() @safe pure nothrow {
     return SysTime.max;
@@ -34,7 +35,8 @@ SysTime timeout(Duration d) @safe nothrow {
 alias delay = timeout;
 
 enum isActor(T) = is(T == Actor*) || isTypedActor!T || isTypedActorImpl!T;
-enum isAddress(T) = is(T == RcAddress) || isTypedAddress!T;
+enum isAddress(T) = is(T == WeakAddress) || is(T == StrongAddress) || isTypedAddress!T;
+enum isDynamicAddress(T) = is(T == WeakAddress) || is(T == StrongAddress);
 
 /** Link the lifetime of `self` to the actor using `sendTo`.
  *
@@ -50,8 +52,11 @@ void linkTo(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     auto self_ = underlyingAddress(self);
     auto addr = underlyingAddress(sendTo);
 
-    sendSystemMsg(self_, LinkRequest(addr));
-    sendSystemMsg(addr, LinkRequest(self_));
+    if (self_.empty || addr.empty)
+        return;
+
+    sendSystemMsg(self_, LinkRequest(addr.weakRef));
+    sendSystemMsg(addr, LinkRequest(self_.weakRef));
 }
 
 /// Remove the link between `self` and the actor using `sendTo`.
@@ -63,8 +68,11 @@ void unlinkTo(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     auto self_ = underlyingAddress(self);
     auto addr = underlyingAddress(sendTo);
 
-    sendSystemMsg(self_, UnlinkRequest(addr));
-    sendSystemMsg(addr, UnlinkRequest(self_));
+    if (self_.empty || addr.empty)
+        return;
+
+    sendSystemMsg(self_, UnlinkRequest(addr.weakRef));
+    sendSystemMsg(addr, UnlinkRequest(self_.weakRef));
 }
 
 /** Actor `self` will receive a `DownMsg` when `sendTo` shutdown.
@@ -79,7 +87,10 @@ void monitor(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     auto self_ = underlyingAddress(self);
     auto addr = underlyingAddress(sendTo);
 
-    sendSystemMsg(addr, MonitorRequest(self_));
+    if (self_.empty || addr.empty)
+        return;
+
+    sendSystemMsg(addr, MonitorRequest(self_.weakRef));
 }
 
 /// Remove `self` as a monitor of the actor using `sendTo`.
@@ -91,31 +102,48 @@ void demonitor(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     auto self_ = underlyingAddress(self);
     auto addr = underlyingAddress(sendTo);
 
-    sendSystemMsg(addr, DemonitorRequest(self_));
+    if (self_.empty || addr.empty)
+        return;
+
+    sendSystemMsg(addr, DemonitorRequest(self_.weakRef));
 }
 
 // Only send the message if the system message queue is empty.
-package void sendSystemMsgIfEmpty(T)(RcAddress sendTo, T msg) @safe {
-    if (sendTo().isOpen && sendTo().sysMsg.empty)
-        sendTo().sysMsg.put(SystemMsg(msg));
+package void sendSystemMsgIfEmpty(AddressT, T)(AddressT sendTo, T msg) @safe
+        if (isAddress!AddressT)
+in (!sendTo.empty, "cannot sent to empty address") {
+    if (sendTo.empty)
+        return;
+
+    auto addr = underlyingAddress(sendTo);
+
+    if (!addr.empty && addr.isOpen && addr.safeGet.empty!SystemMsg)
+        addr.put(SystemMsg(msg));
 }
 
-package void sendSystemMsg(T)(RcAddress sendTo, T msg) @safe {
-    if (sendTo().isOpen)
-        sendTo().sysMsg.put(SystemMsg(msg));
+package void sendSystemMsg(AddressT, T)(AddressT sendTo, T msg) @safe
+        if (isAddress!AddressT)
+in (!sendTo.empty, "cannot sent to empty address") {
+    if (sendTo.empty)
+        return;
+
+    auto addr = underlyingAddress(sendTo);
+
+    if (!addr.empty && addr.isOpen)
+        addr.put(SystemMsg(msg));
 }
 
 /// Trigger the message in the future.
 void delayedSend(AddressT, Args...)(AddressT sendTo, SysTime delayTo, auto ref Args args) @trusted
-        if (is(AddressT == RcAddress) || is(AddressT == Actor*)) {
+        if (is(AddressT == WeakAddress) || is(AddressT == StrongAddress) || is(AddressT == Actor*)) {
     alias UArgs = staticMap!(Unqual, Args);
     auto addr = underlyingAddress(sendTo);
-    if (addr().isOpen)
-        addr().delayed.put(DelayedMsg(Msg(MsgType.oneShot,
-                makeSignature!UArgs, Variant(Tuple!UArgs(args))), delayTo));
+    if (!addr.empty && addr.isOpen)
+        addr.put(DelayedMsg(Msg(MsgType.oneShot, makeSignature!UArgs,
+                Variant(Tuple!UArgs(args))), delayTo));
 }
 
-void sendExit(RcAddress sendTo, const ExitReason reason) @safe {
+void sendExit(WeakAddress sendTo, const ExitReason reason) @safe {
     import my.actor.system_msg : SystemExitMsg;
 
     sendSystemMsg(sendTo, SystemExitMsg(reason));
@@ -123,27 +151,44 @@ void sendExit(RcAddress sendTo, const ExitReason reason) @safe {
 
 // TODO: add verification that args do not have interior pointers
 void send(AddressT, Args...)(AddressT sendTo, auto ref Args args) @trusted
-        if (is(AddressT == RcAddress) || is(AddressT == Actor*)) {
+        if (isDynamicAddress!AddressT || is(AddressT == Actor*)) {
     alias UArgs = staticMap!(Unqual, Args);
     auto addr = underlyingAddress(sendTo);
-    if (addr().isOpen)
-        addr().incoming.put(Msg(MsgType.oneShot, makeSignature!UArgs,
-                Variant(Tuple!UArgs(args))));
+    if (!addr.empty && addr.isOpen)
+        addr.put(Msg(MsgType.oneShot, makeSignature!UArgs, Variant(Tuple!UArgs(args))));
 }
 
 package struct RequestSend {
     Actor* self;
-    RcAddress requestTo;
+    WeakAddress requestTo;
     SysTime timeout;
     ulong replyId;
+
+    /// Copy constructor
+    this(ref return scope typeof(this) rhs) @safe pure nothrow @nogc {
+        self = rhs.self;
+        requestTo = rhs.requestTo;
+        timeout = rhs.timeout;
+        replyId = rhs.replyId;
+    }
+
+    @disable this(this);
 }
 
 package struct RequestSendThen {
     RequestSend rs;
     Msg msg;
+
+    @disable this(this);
+
+    /// Copy constructor
+    this(ref return typeof(this) rhs) {
+        rs = rhs.rs;
+        msg = rhs.msg;
+    }
 }
 
-RequestSend request(ActorT)(ActorT self, RcAddress requestTo, SysTime timeout)
+RequestSend request(ActorT)(ActorT self, WeakAddress requestTo, SysTime timeout)
         if (is(ActorT == Actor*)) {
     return RequestSend(self, requestTo, timeout, self.replyId);
 }
@@ -156,7 +201,7 @@ RequestSendThen send(Args...)(RequestSend r, auto ref Args args) {
         MsgType.request,
         makeSignature!UArgs,
         () @trusted {
-        return Variant(Tuple!(ulong, RcAddress, Variant)(r.replyId, r.self.addr, Variant(Tuple!UArgs(args))));
+        return Variant(Tuple!(ulong, WeakAddress, Variant)(r.replyId, r.self.addr.weakRef, Variant(Tuple!UArgs(args))));
         }()
     );
     // dfmt on
@@ -182,7 +227,11 @@ private struct ThenContext(Captures...) {
 // escaped.
 package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
         void* ctx, ErrorHandler onError = null) @trusted {
-    if (!r.rs.requestTo().isOpen) {
+    auto requestTo = r.rs.requestTo.asRefCounted;
+    if (requestTo.empty)
+        return; // TODO: should probably be an error sent via onError.
+
+    if (!requestTo.isOpen) {
         if (onError)
             onError(*r.rs.self, ErrorMsg(r.rs.requestTo, SystemError.requestReceiverDown));
         return;
@@ -203,7 +252,7 @@ package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
     }();
 
     // then send it
-    r.rs.requestTo().incoming.put(r.msg);
+    requestTo.put(r.msg);
 }
 
 void then(T, CtxT = void)(scope RequestSendThen r, T handler, ErrorHandler onError = null) @trusted
@@ -229,13 +278,20 @@ private struct TypedRequestSend(TAddress) {
 TypedRequestSend!TAddress request(TActor, TAddress)(ref TActor self, TAddress sendTo,
         SysTime timeout)
         if (isActor!TActor && (isTypedActorImpl!TAddress || isTypedAddress!TAddress)) {
-    return typeof(return)(request(underlyingActor(self), underlyingAddress(sendTo), timeout));
+    return typeof(return)(.request(underlyingActor(self), underlyingWeakAddress(sendTo), timeout));
 }
 
 private struct TypedRequestSendThen(TAddress, Params_...) {
     alias TypeAddress = TAddress;
     alias Params = Params_;
     RequestSendThen rs;
+
+    /// Copy constructor
+    this(ref return scope typeof(this) rhs) {
+        rs = rhs.rs;
+    }
+
+    @disable this(this);
 }
 
 auto send(TR, Args...)(scope TR tr, auto ref Args args)

@@ -18,7 +18,7 @@ import my.optional;
 
 public import my.actor.typed;
 public import my.actor.actor : Actor, build, makePromise, Promise, scopedActor, impl;
-public import my.actor.mailbox : Address, RcAddress, makeAddress;
+public import my.actor.mailbox : Address, makeAddress2, WeakAddress;
 public import my.actor.msg;
 import my.actor.common;
 import my.actor.memory : ActorAlloc;
@@ -88,9 +88,9 @@ struct System {
     }
 
     /// spawn dynamic actor.
-    RcAddress spawn(Fn, Args...)(Fn fn, auto ref Args args)
+    WeakAddress spawn(Fn, Args...)(Fn fn, auto ref Args args)
             if (is(Parameters!Fn[0] == Actor*) && is(ReturnType!Fn == Actor*)) {
-        auto actor = bg.alloc.make(makeAddress);
+        auto actor = bg.alloc.make(makeAddress2);
         return schedule(fn(actor, forward!args));
     }
 
@@ -98,7 +98,7 @@ struct System {
     auto spawn(Fn, Args...)(Fn fn, auto ref Args args)
             if (isTypedActorImpl!(Parameters!(Fn)[0])) {
         alias ActorT = TypedActor!(Parameters!(Fn)[0].AllowedMessages);
-        auto actor = bg.alloc.make(makeAddress);
+        auto actor = bg.alloc.make(makeAddress2);
         auto impl = fn(ActorT.Impl(actor), forward!args);
         schedule(actor);
         return impl.address;
@@ -106,11 +106,10 @@ struct System {
 
     // schedule an actor for execution in the thread pool.
     // Returns: the address of the actor.
-    private RcAddress schedule(Actor* actor) @safe {
-        auto addr = actor.address;
+    private WeakAddress schedule(Actor* actor) @safe {
         actor.setHomeSystem(&this);
         bg.scheduler.putWaiting(actor);
-        return addr;
+        return actor.address;
     }
 }
 
@@ -234,6 +233,8 @@ struct Backend {
  * workers are notified that there are actors waiting to be executed.
  */
 class Scheduler {
+    import core.atomic : atomicOp, atomicLoad;
+
     SystemConfig.Scheduler conf;
 
     ActorAlloc* alloc;
@@ -250,9 +251,11 @@ class Scheduler {
 
     // actors waiting to be executed by a worker.
     Queue!(Actor*) waiting;
+    shared ulong approxWaiting;
 
     // Actors waiting for messages to arrive thus they are inactive.
     Queue!(Actor*) inactive;
+    shared ulong approxInactive;
 
     Task!(worker, Scheduler, const ulong)*[] workers;
     Task!(watchInactive, Scheduler)* watcher;
@@ -292,12 +295,14 @@ class Scheduler {
         Duration pollInterval = minPoll;
 
         while (sched.isActive) {
-            const runActors = sched.inactive.length;
+            const runActors = atomicLoad(sched.approxInactive);
             ulong inactive;
             Duration nextPoll = pollInterval;
 
             foreach (_; 0 .. runActors) {
                 if (auto a = sched.inactive.pop) {
+                    atomicOp!"-="(sched.approxInactive, 1UL);
+
                     void moveToWaiting() {
                         sched.putWaiting(a);
                     }
@@ -351,7 +356,7 @@ class Scheduler {
         const inactiveLimit = min(500.dur!"msecs", pollInterval * 3);
 
         while (sched.isActive) {
-            const runActors = sched.waiting.length;
+            const runActors = atomicLoad(sched.approxWaiting);
             ulong consecutiveInactive;
 
             foreach (_; 0 .. runActors) {
@@ -359,6 +364,8 @@ class Scheduler {
                 const now = Clock.currTime;
                 //writefln("mark %s %s %s", now, lastActive, (now - lastActive));
                 if (auto ctx = sched.pop) {
+                    atomicOp!"-="(sched.approxWaiting, 1);
+
                     ulong msgs;
                     ulong totalMsgs;
                     do {
@@ -398,7 +405,7 @@ class Scheduler {
         }
 
         while (!sched.waiting.empty) {
-            const sleepAfter = sched.waiting.length;
+            const sleepAfter = atomicLoad(sched.approxWaiting) + 1;
             for (size_t i; i < sleepAfter; ++i) {
                 if (auto ctx = sched.pop) {
                     sendSystemMsgIfEmpty(ctx.address, SystemExitMsg(ExitReason.kill));
@@ -447,6 +454,7 @@ class Scheduler {
     void putWaiting(Actor* a) @safe {
         if (a.isAlive) {
             waiting.put(a);
+            atomicOp!"+="(approxWaiting, 1);
         } else {
             // TODO: should terminated actors be logged?
             alloc.dispose(a);
@@ -455,5 +463,6 @@ class Scheduler {
 
     void putInactive(Actor* a) @safe {
         inactive.put(a);
+        atomicOp!"+="(approxInactive, 1);
     }
 }

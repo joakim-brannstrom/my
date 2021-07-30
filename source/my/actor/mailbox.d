@@ -15,12 +15,19 @@ import my.actor.common;
 import my.gc.refc;
 public import my.actor.system_msg;
 
-@safe:
-
 struct Msg {
     MsgType type;
     ulong signature;
     Variant data;
+
+    /// Copy constructor
+    this(ref return typeof(this) rhs) {
+        type = rhs.type;
+        signature = rhs.signature;
+        data = rhs.data;
+    }
+
+    @disable this(this);
 }
 
 enum MsgType {
@@ -34,11 +41,25 @@ alias SystemMsg = SumType!(ErrorMsg, DownMsg, ExitMsg, SystemExitMsg,
 struct Reply {
     ulong id;
     Variant data;
+
+    this(ref return Reply a) {
+        id = a.id;
+        data = a.data;
+    }
+
+    @disable this(this);
 }
 
 struct DelayedMsg {
     Msg msg;
     SysTime triggerAt;
+
+    this(ref return DelayedMsg a) {
+        msg = a.msg;
+        triggerAt = a.triggerAt;
+    }
+
+    @disable this(this);
 }
 
 struct Address {
@@ -46,6 +67,7 @@ struct Address {
         // If the actor that use the address is active and processing messages.
         bool open_;
         ulong id_;
+        Mutex mtx;
     }
 
     package {
@@ -60,8 +82,10 @@ struct Address {
         Queue!Reply replies;
     }
 
-    private this(Mutex mtx)
+    private this(Mutex mtx) @safe
     in (mtx !is null) {
+        this.mtx = mtx;
+
         // lazy way of generating an ID. a mutex is a class thus allocated on
         // the heap at a unique location. just... use the pointer as the ID.
         () @trusted { id_ = cast(ulong) cast(void*) mtx; }();
@@ -79,10 +103,15 @@ struct Address {
 
     void shutdown() @safe nothrow {
         try {
-            incoming.teardown;
-            sysMsg.teardown;
-            delayed.teardown;
-            replies.teardown;
+            synchronized (mtx) {
+                incoming.teardown((ref Msg a) { a.data = a.data.type.init; });
+                sysMsg.teardown((ref SystemMsg a) { a = SystemMsg.init; });
+                delayed.teardown((ref DelayedMsg a) {
+                    a.msg.data = a.msg.data.type.init;
+                });
+                replies.teardown((ref Reply a) { a.data = a.data.type.init; });
+                open_ = false;
+            }
         } catch (Exception e) {
             assert(0, "this should never happen");
         }
@@ -97,8 +126,51 @@ struct Address {
         return open_;
     }
 
+    package void put(T)(T msg) {
+        static if (is(T : Msg))
+            incoming.put(msg);
+        else static if (is(T : SystemMsg))
+            sysMsg.put(msg);
+        else static if (is(T : DelayedMsg))
+            delayed.put(msg);
+        else static if (is(T : Reply))
+            replies.put(msg);
+        else
+            static assert(0, "msg type not supported " ~ T.stringof);
+    }
+
+    package T pop(T)() {
+        static if (is(T : Msg))
+            return incoming.pop;
+        else static if (is(T : SystemMsg))
+            return sysMsg.pop;
+        else static if (is(T : DelayedMsg))
+            return delayed.pop;
+        else static if (is(T : Reply))
+            return replies.pop;
+        else
+            static assert(0, "msg type not supported " ~ T.stringof);
+    }
+
+    package bool empty(T)() @safe {
+        static if (is(T : Msg))
+            return incoming.empty;
+        else static if (is(T : SystemMsg))
+            return sysMsg.empty;
+        else static if (is(T : DelayedMsg))
+            return delayed.empty;
+        else static if (is(T : Reply))
+            return replies.empty;
+        else
+            static assert(0, "msg type not supported " ~ T.stringof);
+    }
+
     package bool hasMessage() @safe pure nothrow const @nogc {
-        return !(incoming.empty && sysMsg.empty && delayed.empty && replies.empty);
+        try {
+            return !(incoming.empty && sysMsg.empty && delayed.empty && replies.empty);
+        } catch (Exception e) {
+        }
+        return false;
     }
 
     package void setOpen() @safe pure nothrow @nogc {
@@ -110,8 +182,15 @@ struct Address {
     }
 }
 
-/// Keep track of the pointer to allow detecting when it is only the actor itself that is referesing it.
-struct RcAddress {
+alias WeakAddress = WeakRef!(Address*);
+
+/** Messages can be sent to a strong address.
+ */
+struct StrongAddress {
+    import core.stdc.stdio : printf;
+
+@safe:
+
     package {
         RefCounted!(Address*) addr;
     }
@@ -120,7 +199,12 @@ struct RcAddress {
 
     private this(Address* addr) {
         this.addr = refCounted(addr);
-        import core.stdc.stdio : printf;
+
+        //() @trusted { printf("a %lx %d\n", cast(ulong) addr, this.addr.refCount); }();
+    }
+
+    package this(RefCounted!(Address*) addr) {
+        this.addr = addr;
 
         () @trusted { printf("a %lx %d\n", cast(ulong) addr, this.addr.refCount); }();
     }
@@ -134,38 +218,33 @@ struct RcAddress {
         // actors. Actors that are never shutdown because they are not detected
         // as "unreachable".
         if (!empty) {
-            import core.stdc.stdio : printf;
-
             () @trusted {
-                printf("b %lx %d %d\n", cast(ulong) addr.get, addr.refCount, GC.inFinalizer);
+                printf("b %lx %d %d\n", cast(ulong) addr, addr.refCount, GC.inFinalizer);
             }();
-            //assert(!GC.inFinalizer, "Error: clean-up of RcAddress incorrectly" ~
-            //       " depends on destructors called by the GC.");
+            assert(!GC.inFinalizer,
+                    "Error: clean-up of StrongAddress incorrectly"
+                    ~ " depends on destructors called by the GC.");
         }
     }
 
     package void release() @safe nothrow @nogc {
-        addr.release;
-
-        import core.stdc.stdio : printf;
-
         () @trusted {
             if (!empty)
                 printf("c %lx %d\n", cast(ulong) addr, this.addr.refCount);
         }();
+
+        addr.release;
     }
 
     ulong id() @safe pure nothrow const @nogc {
-        return cast(ulong) addr.get;
+        return cast(ulong) addr.unsafePtr;
     }
 
     size_t toHash() @safe pure nothrow const @nogc scope {
-        return cast(size_t) addr.get;
+        return cast(size_t) addr.unsafePtr;
     }
 
-    void opAssign(RcAddress rhs) @safe nothrow @nogc {
-        import core.stdc.stdio : printf;
-
+    void opAssign(StrongAddress rhs) @safe nothrow @nogc {
         () @trusted {
             if (!empty)
                 printf("d %lx %d\n", cast(ulong) addr, this.addr.refCount);
@@ -181,15 +260,19 @@ struct RcAddress {
         return addr.get;
     }
 
-    ref inout(Address) safeGet() inout @safe pure nothrow @nogc scope return  {
+    package ref inout(Address) safeGet() inout @safe pure nothrow @nogc scope return  {
         return *addr.get;
     }
 
-    ref inout(Address) opCall() inout @safe pure nothrow @nogc scope return  {
+    package ref inout(Address) opCall() inout @safe pure nothrow @nogc scope return  {
         return safeGet;
+    }
+
+    WeakAddress weakRef() @safe nothrow {
+        return addr.weakRef;
     }
 }
 
-RcAddress makeAddress() {
-    return RcAddress(new Address(new Mutex));
+StrongAddress makeAddress2() @safe {
+    return StrongAddress(new Address(new Mutex));
 }

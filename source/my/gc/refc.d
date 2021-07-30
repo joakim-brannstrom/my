@@ -48,9 +48,8 @@ private void incrUseCnt(T)(ref T cb) nothrow {
     cb.useCnt.atomicOp!"+="(1);
 }
 
-private void releaseUseCnt(T)(ref T cb) {
-    assert(cb.useCnt >= 0, "Invalid count detected");
-
+private void releaseUseCnt(T)(ref T cb)
+in (cb.useCnt >= 0, "Invalid count detected") {
     if (cb.useCnt.atomicOp!"-="(1) == 0) {
         destroy(cb.item);
         releaseWeakCnt(cb);
@@ -61,8 +60,8 @@ private void incrWeakCnt(T)(ref T cb) nothrow {
     cb.weakCnt.atomicOp!"+="(1);
 }
 
-private void releaseWeakCnt(T)(ref T cb) @trusted {
-    assert(cb.weakCnt >= 0, "Invalid count detected");
+private void releaseWeakCnt(T)(ref T cb) @trusted
+in (cb.weakCnt >= 0, "Invalid count detected") {
 
     if (cb.weakCnt.atomicOp!"-="(1) == 0) {
         GC.removeRoot(cb);
@@ -139,12 +138,11 @@ struct RefCounted(T) {
     }
 
     inout(T*) unsafePtr() inout {
-        assert(impl, "Invalid refcounted access");
         return item;
     }
 
     ref inout(T) get() inout {
-        assert(impl, "Invalid refcounted access");
+        assert(item, "Invalid refcounted access");
         return *item;
     }
 
@@ -243,34 +241,56 @@ struct WeakRef(T) {
     private T* item;
 
     this(RefCounted!T r) {
+        if (r.empty)
+            return;
+
         incrWeakCnt(r.impl);
-        scope (failure) {
+        scope (failure)
             releaseWeakCnt(r.impl);
-        }
         impl = r.impl;
     }
 
-    this(ref RefCounted!T r) @safe nothrow {
+    this(ref RefCounted!T r) {
+        if (r.empty)
+            return;
+
         incrWeakCnt(r.impl);
+        scope (failure)
+            releaseWeakCnt(r.impl);
         impl = r.impl;
         setLocalItem;
     }
 
+    /// Copy constructor
+    //this(ref return scope typeof(this) rhs) {
+    //    if (rhs.empty)
+    //        return;
+    //
+    //    incrWeakCnt(r.impl);
+    //    scope (failure)
+    //        releaseWeakCnt(r.impl);
+    //    impl = rhs.impl;
+    //    setLocalItem;
+    //}
+    //@disable this(this);
+
     this(this) {
-        if (impl) {
+        if (impl)
             incrWeakCnt(impl);
-        }
     }
 
     ~this() @safe {
-        if (impl) {
+        if (impl)
             releaseWeakCnt(impl);
-        }
     }
 
     private void setLocalItem() @trusted {
         if (impl)
             item = &impl.item;
+    }
+
+    inout(T*) unsafePtr() inout {
+        return item;
     }
 
     void opAssign(WeakRef other) @safe nothrow {

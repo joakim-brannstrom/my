@@ -18,6 +18,8 @@ the limier.
 */
 module my.actor.utility.limiter;
 
+import core.atomic : atomicOp;
+import logger = std.experimental.logger;
 import std.array : empty;
 import std.typecons : Tuple, tuple;
 
@@ -110,10 +112,10 @@ unittest {
     static struct Tick {
     }
 
-    RcAddress[] senders;
+    WeakAddress[] senders;
     foreach (_; 0 .. 100) {
         static struct State {
-            RcAddress recv;
+            WeakAddress recv;
             FlowControlActor.Address limiter;
         }
 
@@ -121,10 +123,10 @@ unittest {
         }
 
         senders ~= sys.spawn((Actor* self) {
-            auto st = tuple!("self", "state")(self, refCounted(State(RcAddress.init, limiter)));
+            auto st = tuple!("self", "state")(self, refCounted(State(WeakAddress.init, limiter)));
             alias CT = typeof(st);
 
-            return build(self).set((ref CT ctx, RcAddress recv) {
+            return build(self).set((ref CT ctx, WeakAddress recv) {
                 ctx.state.recv = recv;
                 send(ctx.self.address, Tick.init);
             }, capture(st)).set((ref CT ctx, Tick _) {
@@ -149,7 +151,7 @@ unittest {
                 delayedSend(ctx.self, delay(100.dur!"msecs"), Tick.init);
         }, capture(st)).set((ref CT ctx, Token t, int _) {
             delayedSend(ctx.limiter, delay(100.dur!"msecs"), ReturnTokenMsg.init);
-            ctx.count++;
+            ctx.count.get++;
             send(ctx.self, Tick.init);
         }, capture(st)).finalize;
     });
@@ -162,10 +164,12 @@ unittest {
         send(s, consumer);
 
     auto sw = StopWatch(AutoStart.yes);
-    while (counter < 100) {
+    while (counter.get < 100 && sw.peek < 1.dur!"seconds") {
+        logger.infof("%s %s", counter.refCount, counter.get);
         Thread.sleep(1.dur!"msecs");
     }
 
+    assert(counter.get >= 100);
     // 40 tokens mean that it will trigger at least two "slowdown" which is at least 200 ms.
     assert(sw.peek > 200.dur!"msecs");
 }

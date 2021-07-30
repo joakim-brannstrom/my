@@ -28,7 +28,7 @@ import my.gc.refc;
 import sumtype;
 
 private struct PromiseData {
-    RcAddress replyTo;
+    WeakAddress replyTo;
     ulong replyId;
 }
 
@@ -52,13 +52,20 @@ struct Promise(T) {
         scope (exit)
             () { data = PromiseData.init; data.release; }();
 
+        if (data.empty)
+            return;
+
+        auto replyTo = data.replyTo.asRefCounted;
         // TODO: should probably call delivering actor with an ErrorMsg if replyTo is closed.
-        if (!data.empty && data.replyTo().isOpen) {
+        if (replyTo.empty)
+            return;
+
+        if (replyTo.isOpen) {
             enum wrapInTuple = !is(T : Tuple!U, U);
             static if (wrapInTuple)
-                data.replyTo().replies.put(Reply(data.replyId, Variant(tuple(reply))));
+                replyTo.put(Reply(data.replyId, Variant(tuple(reply))));
             else
-                data.replyTo().replies.put(Reply(data.replyId, Variant(reply)));
+                replyTo.put(Reply(data.replyId, Variant(reply)));
         }
     }
 
@@ -99,7 +106,7 @@ struct RequestResult(T) {
 
 private alias MsgHandler = void delegate(void* ctx, ref Variant msg) @safe;
 private alias RequestHandler = void delegate(void* ctx, ref Variant msg,
-        ulong replyId, scope RcAddress replyTo) @safe;
+        ulong replyId, scope WeakAddress replyTo) @safe;
 private alias ReplyHandler = void delegate(void* ctx, ref Variant msg) @safe;
 
 alias DefaultHandler = void delegate(ref Actor self, ref Variant msg) @safe nothrow;
@@ -184,7 +191,7 @@ struct ReplyHandlerTimeout {
     SysTime timeout;
 }
 
-private enum ActorState {
+package enum ActorState {
     /// waiting to be started.
     waiting,
     /// active and processing messages.
@@ -205,7 +212,7 @@ private struct AwaitReponse {
 }
 
 struct Actor {
-    package RcAddress addr;
+    package StrongAddress addr;
     // visible in the package for logging purpose.
     package ActorState state_;
 
@@ -222,16 +229,16 @@ struct Actor {
         ulong nextReplyId = 1;
 
         /// Delayed messages ordered by their trigger time.
-        DelayedMsg[] delayed;
+        //DelayedMsg[] delayed;
 
         /// Used during shutdown to signal monitors and links why this actor is terminating.
         SystemError lastError;
 
         /// monitoring the actor lifetime.
-        RcAddress[size_t] monitors;
+        WeakAddress[size_t] monitors;
 
         /// strong, bidirectional link of the actors lifetime.
-        RcAddress[size_t] links;
+        WeakAddress[size_t] links;
 
         // Number of messages that has been processed.
         ulong messages_;
@@ -253,17 +260,17 @@ struct Actor {
         DefaultHandler defaultHandler_;
     }
 
-    invariant () {
-        if (state_ != ActorState.waiting) {
-            assert(!addr.empty);
-            assert(errorHandler_);
-            assert(exitHandler_);
-            assert(exceptionHandler_);
-            assert(defaultHandler_);
-        }
-    }
+    //invariant () {
+    //    if (state_ != ActorState.waiting) {
+    //        assert(!addr.empty);
+    //        assert(errorHandler_);
+    //        assert(exitHandler_);
+    //        assert(exceptionHandler_);
+    //        assert(defaultHandler_);
+    //    }
+    //}
 
-    this(RcAddress a) @trusted {
+    this(StrongAddress a) @trusted {
         addr = a;
         addr.setOpen;
         errorHandler_ = toDelegate(&defaultErrorHandler);
@@ -273,11 +280,11 @@ struct Actor {
         defaultHandler_ = toDelegate(&.defaultHandler);
     }
 
-    RcAddress address() @safe nothrow @nogc {
-        return addr;
+    WeakAddress address() @safe {
+        return addr.weakRef;
     }
 
-    ref RcAddress addressRef() @safe pure nothrow @nogcreturn  {
+    package ref StrongAddress addressRef() return @safe pure nothrow @nogc {
         return addr;
     }
 
@@ -350,8 +357,9 @@ package:
 
     /// How long until a delayed message or a timeout fires.
     Duration nextTimeout(const SysTime now, const Duration default_) @safe pure nothrow const @nogc {
-        return min(delayed.empty ? default_ : (delayed[0].triggerAt - now),
-                replyTimeouts.empty ? default_ : (replyTimeouts[0].timeout - now));
+        return Duration.zero;
+        //return min(delayed.empty ? default_ : (delayed[0].triggerAt - now),
+        //        replyTimeouts.empty ? default_ : (replyTimeouts[0].timeout - now));
     }
 
     /// Number of messages that has been processed.
@@ -389,6 +397,16 @@ package:
             }
         }
         awaitedResponses = null;
+    }
+
+    void cleanupDelayed() @trusted nothrow {
+        //foreach (ref a; delayed) {
+        //    try {
+        //        a.msg = Msg.init;
+        //    } catch (Exception e) {
+        //    }
+        //}
+        //delayed = null;
     }
 
     bool isAlive() @safe pure nothrow const @nogc {
@@ -470,15 +488,14 @@ package:
             state_ = ActorState.stopped;
             addr.setClosed;
             addr.shutdown;
+            addr.release;
 
-            sendToMonitors(DownMsg(addr, lastError));
-            monitors = null;
+            sendToMonitors(DownMsg(addr.weakRef, lastError));
 
-            sendToLinks(ExitMsg(addr, lastError));
-            links = null;
+            sendToLinks(ExitMsg(addr.weakRef, lastError));
 
-            delayed = null;
             replyTimeouts = null;
+            cleanupDelayed;
             cleanupAwait;
             break;
         case ActorState.stopped:
@@ -490,24 +507,30 @@ package:
         // trusted. OK because the constness is just some weird thing with inout and byKey.
         foreach (ref a; monitors.byValue) {
             try {
-                if (a.isOpen)
-                    a.sysMsg.put(SystemMsg(msg));
+                auto rc = a.asRefCounted;
+                if (!rc.empty && rc.isOpen)
+                    rc.put(SystemMsg(msg));
                 a.release;
             } catch (Exception e) {
             }
         }
+
+        monitors = null;
     }
 
     void sendToLinks(ExitMsg msg) @trusted nothrow {
         // trusted. OK because the constness is just some weird thing with inout and byKey.
         foreach (ref a; links.byValue) {
             try {
-                if (a.isOpen)
-                    a.sysMsg.put(SystemMsg(msg));
+                auto rc = a.asRefCounted;
+                if (!rc.empty && rc.isOpen)
+                    rc.put(SystemMsg(msg));
                 a.release;
             } catch (Exception e) {
             }
         }
+
+        links = null;
     }
 
     void checkReplyTimeout(const SysTime now) @safe {
@@ -520,7 +543,7 @@ package:
                 const id = replyTimeouts[i].id;
                 if (auto v = id in awaitedResponses) {
                     messages_++;
-                    v.onError(this, ErrorMsg(addr, SystemError.requestTimeout));
+                    v.onError(this, ErrorMsg(addr.weakRef, SystemError.requestTimeout));
                     try {
                         () @trusted { v.behavior.free; }();
                     } catch (Exception e) {
@@ -541,11 +564,11 @@ package:
     }
 
     void processIncoming() @safe {
-        if (addr.incoming.empty)
+        if (addr().empty!Msg)
             return;
         messages_++;
 
-        auto front = addr.incoming.pop;
+        auto front = addr().pop!Msg;
 
         void doSend() {
             if (auto v = front.signature in incoming) {
@@ -556,7 +579,7 @@ package:
         }
 
         void doRequest() @trusted {
-            auto um = front.data.get!(Tuple!(ulong, RcAddress, Variant));
+            auto um = front.data.get!(Tuple!(ulong, WeakAddress, Variant));
 
             if (auto v = front.signature in reqBehavior) {
                 (*v)(um[2], um[0], um[1]);
@@ -565,8 +588,7 @@ package:
                 defaultHandler_(this, um[2]);
             }
 
-            //um = typeof(um).init;
-            //.destroy(front);
+            //um[2] = um[2].type.init;
         }
 
         final switch (front.type) {
@@ -577,6 +599,13 @@ package:
             doRequest();
             break;
         }
+
+        () @trusted {
+            logger.info(front);
+            auto v = front.data.get!(Tuple!(StrongAddress))[0];
+            logger.info(v.safeGet.incoming.empty);
+            front.data = front.data.type.init;
+        }();
     }
 
     /** All system messages are handled.
@@ -592,25 +621,25 @@ package:
      *    the actor system is out of scope.
      */
     void processSystemMsg() @safe {
-        while (!addr.sysMsg.empty) {
+        while (!addr().empty!SystemMsg) {
             messages_++;
-            auto front = addr.sysMsg.pop;
+            auto front = addr().pop!SystemMsg;
 
             front.match!((ref DownMsg a) {
                 if (downHandler_)
                     downHandler_(this, a);
             }, (ref MonitorRequest a) {
-                monitors[a.addr.toHash] = a.addr;
-                a.addr.release;
+                monitors[cast(size_t) a.addr.unsafePtr] = a.addr;
             }, (ref DemonitorRequest a) {
-                monitors.remove(a.addr.toHash);
-                a.addr.release;
+                if (auto v = cast(size_t) a.addr.unsafePtr in monitors)
+                    v.release;
+                monitors.remove(cast(size_t) a.addr.unsafePtr);
             }, (ref LinkRequest a) {
-                links[a.addr.toHash] = a.addr;
-                a.addr.release;
+                links[cast(size_t) a.addr.unsafePtr] = a.addr;
             }, (ref UnlinkRequest a) {
-                links.remove(a.addr.toHash);
-                a.addr.release;
+                if (auto v = cast(size_t) a.addr.unsafePtr in links)
+                    v.release;
+                links.remove(cast(size_t) a.addr.unsafePtr);
             }, (ref ErrorMsg a) { errorHandler_(this, a); a.source.release; }, (ref ExitMsg a) {
                 exitHandler_(this, a);
             }, (ref SystemExitMsg a) {
@@ -639,11 +668,11 @@ package:
     }
 
     void processReply() @safe {
-        if (addr.replies.empty)
+        if (addr().empty!Reply)
             return;
         messages_++;
 
-        auto front = addr.replies.pop;
+        auto front = addr().pop!Reply;
 
         if (auto v = front.id in awaitedResponses) {
             // TODO: reduce the lookups on front.id
@@ -661,34 +690,35 @@ package:
     }
 
     void processDelayed(const SysTime now) @trusted {
-        if (!addr.delayed.empty) {
+        if (!addr().empty!DelayedMsg) {
             // count as a message because handling them are "expensive".
             // Ignoring the case that the message right away is moved to the
             // incoming queue. This lead to "double accounting" but ohh well.
             // Don't use delayedSend when you should have used send.
             messages_++;
-            delayed ~= addr.delayed.pop;
-            if (delayed.length > 1)
-                schwartzSort!(a => a.triggerAt, (a, b) => a < b)(delayed);
-        } else if (delayed.empty) {
-            return;
+            //delayed ~= addr.pop!DelayedMsg;
+            //if (delayed.length > 1)
+            //    schwartzSort!(a => a.triggerAt, (a, b) => a < b)(delayed);
         }
-
-        size_t removeTo;
-        foreach (const i; 0 .. delayed.length) {
-            if (now > delayed[i].triggerAt) {
-                addr.incoming.put(delayed[i].msg);
-                removeTo = i + 1;
-            } else {
-                break;
-            }
-        }
-
-        if (removeTo >= delayed.length) {
-            delayed = null;
-        } else if (removeTo != 0) {
-            delayed = delayed[removeTo .. $];
-        }
+        //else if (delayed.empty) {
+        //    return;
+        //}
+        //
+        //size_t removeTo;
+        //foreach (const i; 0 .. delayed.length) {
+        //    if (now > delayed[i].triggerAt) {
+        //        addr.put(delayed[i].msg);
+        //        removeTo = i + 1;
+        //    } else {
+        //        break;
+        //    }
+        //}
+        //
+        //if (removeTo >= delayed.length) {
+        //    delayed = null;
+        //} else if (removeTo != 0) {
+        //    delayed = delayed[removeTo .. $];
+        //}
     }
 
     private void removeReplyTimeout(ulong id) @safe nothrow {
@@ -772,7 +802,7 @@ struct Closure(Fn, CtxT) {
 
 @("shall register a behavior to be called when msg received matching signature")
 unittest {
-    auto addr = makeAddress;
+    auto addr = makeAddress2;
     auto actor = Actor(addr);
 
     bool processedIncoming;
@@ -781,7 +811,7 @@ unittest {
     }
 
     actor.register(1, Closure!(MsgHandler, void*)(&fn));
-    addr.incoming.put(Msg(MsgType.oneShot, 1, Variant(42)));
+    addr.put(Msg(MsgType.oneShot, 1, Variant(42)));
 
     actor.process(Clock.currTime);
 
@@ -796,43 +826,38 @@ private void cleanupCtx(CtxT)(void* ctx)
     static if (!is(CtxT == void)) {
         // trust that any use of this also pass on the correct context type.
         auto userCtx = () @trusted { return cast(CtxT*) ctx; }();
-        //*userCtx = CtxT.init;
         // release the context such as if it holds a rc object.
         alias Types = CtxT.Types;
+
         static foreach (const i; 0 .. CtxT.Types.length) {
             {
                 alias T = CtxT.Types[i];
                 alias UT = Unqual!T;
-                pragma(msg, "cleanupCtx " ~ T.stringof);
+                //pragma(msg, "cleanupCtx " ~ T.stringof);
                 static if (!is(T == UT)) {
-                    static assert(!is(UT == RcAddress),
-                            "RcAddress must NEVER be const or immutable");
+                    static assert(!is(UT : WeakAddress),
+                            "WeakAddress must NEVER be const or immutable");
                     static assert(!is(UT : TypedAddress!M, M...),
-                            "RcAddress must NEVER be const or immutable: " ~ T.stringof);
+                            "WeakAddress must NEVER be const or immutable: " ~ T.stringof);
                 }
-                static if (is(Unqual!T == T)) {
+                // TODO: add a -version actor_ctx_diagnostic that prints when it is unable to deinit?
+
+                pragma(msg, "ctx " ~ T.stringof ~ " " ~ typeof((*userCtx)[i]).stringof);
+                static if (is(UT == T)) {
                     //pragma(msg, "mutable " ~ T.stringof ~ " " ~ typeof((*userCtx)[i]).stringof);
-                    static if (is(hasElaborateDestructor!T == T) && is(T == struct)) {
-                        pragma(msg, "xdtor");
-                        (*userCtx)[i].__xdtor;
+                    static if (hasElaborateDestructor!T && is(T == struct)) {
+                        pragma(msg, ".destroy");
+                        .destroy((*userCtx)[i]);
+                    } else static if (is(T == Variant!U, U)) {
+                        pragma(msg, "variant init");
+                        (*userCtx)[i] = (*userCtx)[i].type.init;
                     } else {
-                        writeln("init " ~ T.stringof);
                         pragma(msg, "init");
                         (*userCtx)[i] = T.init;
                     }
                 } else {
-                    pragma(msg, "smurf " ~ T[i].stringof);
+                    //pragma(msg, "smurf " ~ T[i].stringof);
                 }
-
-                static if (is(UT == RcAddress)) {
-                    pragma(msg, "smurf1");
-                    (*userCtx)[i].release;
-                } else static if (is(UT : TypedAddress!M, M...)) {
-                    pragma(msg, "smurf2");
-                    (*userCtx)[i].address.release;
-                }
-
-                // TODO: add a version actor_ctx_diagnostic that prints when it is unable to deinit?
             }
         }
     }
@@ -969,7 +994,7 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
 
     alias HArgs = staticMap!(Unqual, Params);
 
-    void fn(void* rawCtx, ref Variant msg, ulong replyId, scope RcAddress replyTo) @trusted {
+    void fn(void* rawCtx, ref Variant msg, ulong replyId, scope WeakAddress replyTo) @trusted {
         static if (is(CtxT == void)) {
             auto r = handler(msg.get!(Tuple!HArgs).expand);
             //pragma(msg, "setHandler. reuse data");
@@ -977,8 +1002,6 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
             auto ctx = cast(CtxParam*) cast(CtxT*) rawCtx;
             auto r = handler(*ctx, msg.get!(Tuple!HArgs).expand);
             //pragma(msg, "setHandler. reuse data");
-            scope (exit)
-                msg = typeof(msg).init;
         }
 
         static if (isReqResult) {
@@ -992,11 +1015,12 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
             }, (data) {
                 // TODO: is this syntax for U one variable or variable. I want it to be variable.
                 enum wrapInTuple = !is(typeof(data) : Tuple!U, U);
-                if (replyTo().isOpen) {
+                auto addr = replyTo.asRefCounted;
+                if (!addr.empty && addr.isOpen) {
                     static if (wrapInTuple)
-                        replyTo().replies.put(Reply(replyId, Variant(tuple(data))));
+                        addr.put(Reply(replyId, Variant(tuple(data))));
                     else
-                        replyTo().replies.put(Reply(replyId, Variant(data)));
+                        addr.put(Reply(replyId, Variant(data)));
                 } else {
                 }
             });
@@ -1006,17 +1030,22 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
         } else {
             // TODO: is this syntax for U one variable or variable. I want it to be variable.
             enum wrapInTuple = !is(RType : Tuple!U, U);
-            if (replyTo().isOpen) {
+            auto rc = replyTo.asRefCounted;
+            if (rc.empty) {
+                logger.info("is empty");
+            } else if (rc.isOpen) {
+                logger.info("is open");
                 static if (wrapInTuple)
-                    replyTo().replies.put(Reply(replyId, Variant(tuple(r))));
+                    rc.put(Reply(replyId, Variant(tuple(r))));
                 else
-                    replyTo().replies.put(Reply(replyId, Variant(r)));
+                    rc.put(Reply(replyId, Variant(r)));
             } else {
+                logger.info("is closed");
             }
 
             () @trusted {
-                if (!replyTo.empty)
-                    printf("e %lx %d\n", replyTo.toHash, replyTo.addr.refCount);
+                if (!rc.empty)
+                    printf("e %lx %d\n", rc.toHash, rc.refCount);
             }();
         }
     }
@@ -1032,9 +1061,9 @@ unittest {
         self.shutdown;
     }
 
-    auto aa1 = Actor(makeAddress);
+    auto aa1 = Actor(makeAddress2);
     auto a1 = build(&aa1).set((int x) {}).exitHandler_(&countExits).finalize;
-    auto aa2 = Actor(makeAddress);
+    auto aa2 = Actor(makeAddress2);
     auto a2 = build(&aa2).set((int x) {}).exitHandler_(&countExits).finalize;
 
     a1.linkTo(a2.address);
@@ -1062,9 +1091,9 @@ unittest {
         count++;
     }
 
-    auto aa1 = Actor(makeAddress);
+    auto aa1 = Actor(makeAddress2);
     auto a1 = build(&aa1).set((int x) {}).downHandler_(&downMsg).finalize;
-    auto aa2 = Actor(makeAddress);
+    auto aa2 = Actor(makeAddress2);
     auto a2 = build(&aa2).set((int x) {}).finalize;
 
     a1.monitor(a2.address);
@@ -1201,7 +1230,7 @@ unittest {
         return typeof(return)(42, "hej");
     }
 
-    auto aa1 = Actor(makeAddress);
+    auto aa1 = Actor(makeAddress2);
     auto a1 = build(&aa1).set(&fn3).set(&fn4).set(&fn5).finalize;
 }
 
@@ -1216,27 +1245,27 @@ unittest {
         *c.delayShouldNeverHappen = true;
     }
 
-    auto aa1 = Actor(makeAddress);
+    auto aa1 = Actor(makeAddress2);
     auto actor = build(&aa1).set(&fn1, capture(&delayOk)).set(&fn2,
             capture(&delayShouldNeverHappen)).finalize;
     delayedSend(actor.address, Clock.currTime - 1.dur!"seconds", "foo");
     delayedSend(actor.address, Clock.currTime + 1.dur!"hours", 42);
 
-    assert(!actor.addressRef.delayed.empty);
-    assert(actor.addressRef.incoming.empty);
-    assert(actor.addressRef.replies.empty);
+    assert(!actor.addressRef.safeGet.empty!DelayedMsg);
+    assert(actor.addressRef.safeGet.empty!Msg);
+    assert(actor.addressRef.safeGet.empty!Reply);
 
     actor.process(Clock.currTime);
 
-    assert(!actor.addressRef.delayed.empty);
-    assert(actor.addressRef.incoming.empty);
-    assert(actor.addressRef.replies.empty);
+    assert(!actor.addressRef.safeGet.empty!DelayedMsg);
+    assert(actor.addressRef.safeGet.empty!Msg);
+    assert(actor.addressRef.safeGet.empty!Reply);
 
     actor.process(Clock.currTime);
 
-    assert(actor.addressRef.delayed.empty);
-    assert(actor.addressRef.incoming.empty);
-    assert(actor.addressRef.replies.empty);
+    assert(actor.addressRef.safeGet.empty!DelayedMsg);
+    assert(actor.addressRef.safeGet.empty!Msg);
+    assert(actor.addressRef.safeGet.empty!Reply);
 
     assert(delayOk);
     assert(!delayShouldNeverHappen);
@@ -1263,7 +1292,7 @@ unittest {
         assert(2 == ctx[1].refCount);
     }
 
-    auto aa1 = Actor(makeAddress);
+    auto aa1 = Actor(makeAddress2);
     auto actor = build(&aa1).set(&fn, capture(&calledOk, rcReq)).finalize;
 
     assert(2 == rcReq.refCount);
@@ -1275,12 +1304,12 @@ unittest {
     }();
     assert(2 == rcReply.refCount);
 
-    assert(!actor.addr.incoming.empty);
-    assert(actor.addr.replies.empty);
+    assert(!actor.addr().empty!Msg);
+    assert(actor.addr().empty!Reply);
 
     actor.process(Clock.currTime);
-    assert(actor.addr.incoming.empty);
-    assert(actor.addr.replies.empty);
+    assert(actor.addr().empty!Msg);
+    assert(actor.addr().empty!Reply);
 
     assert(calledOk);
     assert(calledReply);
@@ -1319,7 +1348,7 @@ unittest {
             *ctx[0] += 1;
     }
 
-    auto aa1 = Actor(makeAddress);
+    auto aa1 = Actor(makeAddress2);
     auto actor = build(&aa1).set(&fn1, capture(&calledOk, fn1p)).set(&fn2,
             capture(&calledOk, fn2p)).finalize;
 
@@ -1371,7 +1400,7 @@ enum ScopedActorError : ubyte {
  * `ScopedActor` is not thread safe.
  */
 struct ScopedActor {
-    import my.actor.typed : underlyingAddress;
+    import my.actor.typed : underlyingAddress, underlyingWeakAddress;
 
     private {
         static struct Data {
@@ -1382,16 +1411,18 @@ struct ScopedActor {
                 if (self.addr.empty)
                     return;
 
+                self.shutdown;
                 while (self.isAlive)
                     self.process(Clock.currTime);
                 self.process(Clock.currTime);
+                self.addr.release;
             }
         }
 
         RefCounted!Data data;
     }
 
-    this(RcAddress addr) @safe {
+    this(StrongAddress addr) @safe {
         data = refCounted(Data(Actor(addr), ScopedActorError.none));
         data.self.name = "ScopedActor";
     }
@@ -1416,16 +1447,24 @@ struct ScopedActor {
         data.errSt = ScopedActorError.unknownMsg;
     }
 
-    SRequestSend request(TAddress)(TAddress requestTo, SysTime timeout) {
+    SRequestSend request(TAddress)(TAddress requestTo, SysTime timeout)
+            if (isAddress!TAddress) {
         reset;
-        auto addr = underlyingAddress(requestTo);
-        auto rs = .request(&data.self, addr, timeout);
+        auto rs = .request(&data.self, underlyingWeakAddress(requestTo), timeout);
         return SRequestSend(rs, this);
     }
 
     private static struct SRequestSend {
         RequestSend rs;
         ScopedActor self;
+
+        /// Copy constructor
+        this(ref return typeof(this) rhs) @safe pure nothrow @nogc {
+            rs = rhs.rs;
+            self = rhs.self;
+        }
+
+        @disable this(this);
 
         SRequestSendThen send(Args...)(auto ref Args args) {
             return SRequestSendThen(.send(rs, args), self);
@@ -1435,8 +1474,17 @@ struct ScopedActor {
     private static struct SRequestSendThen {
         RequestSendThen rs;
         ScopedActor self;
-
         uint backoff;
+
+        /// Copy constructor
+        this(ref return typeof(this) rhs) {
+            rs = rhs.rs;
+            self = rhs.self;
+            backoff = rhs.backoff;
+        }
+
+        @disable this(this);
+
         void dynIntervalSleep() @trusted {
             // +100 usecs "feels good", magic number. current OS and
             // implementation of message passing isn't that much faster than
@@ -1457,6 +1505,10 @@ struct ScopedActor {
             self.data.self.defaultHandler = &self.unknownMsgHandler;
             self.data.self.errorHandler = &self.errorHandler;
 
+            auto requestTo = rs.rs.requestTo.asRefCounted;
+            if (requestTo.empty)
+                throw new ScopedActorException(ScopedActorError.down);
+
             // TODO: this loop is stupid... should use a conditional variable
             // instead but that requires changing the mailbox. later
             do {
@@ -1466,7 +1518,7 @@ struct ScopedActor {
 
                 if (self.data.errSt == ScopedActorError.none) {
                     dynIntervalSleep;
-                    if (!rs.rs.requestTo.isOpen) {
+                    if (!requestTo.isOpen) {
                         self.data.errSt = ScopedActorError.down;
                     }
                 } else {
@@ -1479,7 +1531,7 @@ struct ScopedActor {
 }
 
 ScopedActor scopedActor() @safe {
-    return ScopedActor(makeAddress);
+    return ScopedActor(makeAddress2);
 }
 
 @(
@@ -1489,6 +1541,8 @@ unittest {
 
     auto sys = makeSystem;
 
+    logger.info("apa");
+
     auto a0 = sys.spawn((Actor* self) {
         return impl(self, (ref CSelf!() ctx, int x) {
             Thread.sleep(50.dur!"msecs");
@@ -1497,13 +1551,24 @@ unittest {
             (ref CSelf!() ctx, string x) { ctx.self.shutdown; return 42; }, capture(self));
     });
 
+    //auto a0 = sys.spawn((Actor* self) {
+    //    return impl(self, (int x) {
+    //        Thread.sleep(50.dur!"msecs");
+    //        return 42;
+    //    }, (double x) {},
+    //        (string x) { return 42; });
+    //});
+
     {
+        logger.info("apa");
         auto self = scopedActor;
         bool excThrown;
         auto stopAt = Clock.currTime + 1.dur!"seconds";
         while (!excThrown && Clock.currTime < stopAt) {
             try {
+                logger.info("apa");
                 self.request(a0, delay(1.dur!"nsecs")).send(42).then((int x) {});
+                logger.info("apa");
             } catch (ScopedActorException e) {
                 excThrown = e.error == ScopedActorError.timeout;
             } catch (Exception e) {
@@ -1514,20 +1579,20 @@ unittest {
     }
     logger.info(".....");
 
-    //{
-    //    auto self = scopedActor;
-    //    bool excThrown;
-    //    auto stopAt = Clock.currTime + 100.dur!"msecs";
-    //    while (!excThrown && Clock.currTime < stopAt) {
-    //        try {
-    //            self.request(a0, delay(1.dur!"seconds")).send("hello").then((int x) {
-    //            });
-    //        } catch (ScopedActorException e) {
-    //            excThrown = e.error == ScopedActorError.down;
-    //        } catch (Exception e) {
-    //            logger.info(e.msg);
-    //        }
-    //    }
-    //    assert(excThrown, "detecting terminated actor did not trigger as expected");
-    //}
+    {
+        auto self = scopedActor;
+        bool excThrown;
+        auto stopAt = Clock.currTime + 100.dur!"msecs";
+        while (!excThrown && Clock.currTime < stopAt) {
+            try {
+                self.request(a0, delay(1.dur!"seconds")).send("hello").then((int x) {
+                });
+            } catch (ScopedActorException e) {
+                excThrown = e.error == ScopedActorError.down;
+            } catch (Exception e) {
+                logger.info(e.msg);
+            }
+        }
+        assert(excThrown, "detecting terminated actor did not trigger as expected");
+    }
 }

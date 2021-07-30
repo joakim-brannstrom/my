@@ -12,9 +12,11 @@ import core.sync.mutex : Mutex;
  * The value may be `T.init` if multiple consumers try to pop a value at the same time.
  */
 struct Queue(T) {
+    import std.container.dlist : DList;
+
     private {
         Mutex mtx;
-        T[] data;
+        DList!(T*) data;
         bool open;
     }
 
@@ -25,39 +27,42 @@ struct Queue(T) {
         this.open = true;
     }
 
-    void put(T a) @trusted scope {
+    void put(T a) @trusted {
         synchronized (mtx) {
             if (open)
-                data ~= a;
+                data.insertBack(new T(a));
         }
     }
 
     T pop() @trusted scope {
+        import std.algorithm : move;
+
         T rval;
         synchronized (mtx) {
             if (!empty) {
-                rval = data[0];
-                data = data[1 .. $];
+                move(*data.front, rval);
+                assert(*data.front == T.init);
+                .destroy(data.front);
+                data.removeFront;
+                //data = data[1 .. $];
             }
         }
         return rval;
     }
 
-    size_t length() @safe pure nothrow const @nogc {
-        return data.length;
-    }
-
-    bool empty() @safe pure nothrow const @nogc {
-        return data.length == 0;
+    bool empty() @safe pure const @nogc {
+        synchronized (mtx) {
+            return data.empty;
+        }
     }
 
     /// clear the queue and permanently shut it down by rejecting put messages.
-    void teardown() @trusted {
+    void teardown(void delegate(ref T) deinit) @trusted {
         synchronized (mtx) {
             foreach (ref a; data)
-                a = T.init;
+                deinit(*a);
             open = false;
-            data = null;
+            data.clear;
         }
     }
 }

@@ -48,9 +48,8 @@ private void incrUseCnt(T)(ref T cb) nothrow {
     cb.useCnt.atomicOp!"+="(1);
 }
 
-private void releaseUseCnt(T)(ref T cb) {
-    assert(cb.useCnt >= 0, "Invalid count detected");
-
+private void releaseUseCnt(T)(ref T cb)
+in (cb.useCnt >= 0, "Invalid count detected") {
     if (cb.useCnt.atomicOp!"-="(1) == 0) {
         destroy(cb.item);
         releaseWeakCnt(cb);
@@ -61,9 +60,8 @@ private void incrWeakCnt(T)(ref T cb) nothrow {
     cb.weakCnt.atomicOp!"+="(1);
 }
 
-private void releaseWeakCnt(T)(ref T cb) @trusted {
-    assert(cb.weakCnt >= 0, "Invalid count detected");
-
+private void releaseWeakCnt(T)(ref T cb) @trusted
+in (cb.weakCnt >= 0, "Invalid count detected") {
     if (cb.weakCnt.atomicOp!"-="(1) == 0) {
         GC.removeRoot(cb);
     }
@@ -105,14 +103,13 @@ struct RefCounted(T) {
         import std.conv : emplace;
 
         impl = alloc();
-        () @trusted { emplace(impl, args); GC.addRoot(impl); }();
+        () @trusted { emplace(impl, args); }();
         setLocalItem;
     }
 
     this(this) {
-        if (impl) {
+        if (impl)
             incrUseCnt(impl);
-        }
     }
 
     ~this() {
@@ -130,7 +127,9 @@ struct RefCounted(T) {
             auto rawMem = new void[Impl.sizeof];
         else
             auto rawMem = new ubyte[Impl.sizeof];
-        return (() @trusted => cast(Impl*) rawMem.ptr)();
+        // TODO: only needed for indirections though?
+        GC.addRoot(rawMem.ptr);
+        return cast(Impl*) rawMem.ptr;
     }
 
     private void setLocalItem() @trusted {
@@ -138,13 +137,13 @@ struct RefCounted(T) {
             item = &impl.item;
     }
 
+    /// Returns: pointer to the item or null.
     inout(T*) unsafePtr() inout {
-        assert(impl, "Invalid refcounted access");
         return item;
     }
 
     ref inout(T) get() inout {
-        assert(impl, "Invalid refcounted access");
+        assert(item, "Invalid refcounted access");
         return *item;
     }
 
@@ -158,7 +157,7 @@ struct RefCounted(T) {
 
         if (empty) {
             impl = alloc;
-            () @trusted { emplace(impl, other); GC.addRoot(impl); }();
+            () @trusted { emplace(impl, other); }();
         } else {
             move(other, impl.item);
         }
@@ -243,23 +242,26 @@ struct WeakRef(T) {
     private T* item;
 
     this(RefCounted!T r) {
+        if (r.empty)
+            return;
+
         incrWeakCnt(r.impl);
-        scope (failure) {
-            releaseWeakCnt(r.impl);
-        }
         impl = r.impl;
+        setLocalItem;
     }
 
-    this(ref RefCounted!T r) @safe nothrow {
+    this(ref RefCounted!T r) {
+        if (r.empty)
+            return;
+
         incrWeakCnt(r.impl);
         impl = r.impl;
         setLocalItem;
     }
 
     this(this) {
-        if (impl) {
+        if (impl)
             incrWeakCnt(impl);
-        }
     }
 
     ~this() @safe {
@@ -268,7 +270,7 @@ struct WeakRef(T) {
         }
     }
 
-    private void setLocalItem() @trusted {
+    private void setLocalItem() @trusted nothrow {
         if (impl)
             item = &impl.item;
     }

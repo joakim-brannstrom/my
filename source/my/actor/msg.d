@@ -5,6 +5,7 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.actor.msg;
 
+import logger = std.experimental.logger;
 import std.meta : staticMap, AliasSeq;
 import std.traits : Unqual, Parameters, isFunction, isFunctionPointer;
 import std.typecons : Tuple, tuple;
@@ -196,12 +197,16 @@ RequestSend request(ActorT)(ActorT self, WeakAddress requestTo, SysTime timeout)
 RequestSendThen send(Args...)(RequestSend r, auto ref Args args) {
     alias UArgs = staticMap!(Unqual, Args);
 
+    auto replyTo = r.self.addr.weakRef;
+
+    () @trusted { logger.info(r.self.addr, " ", replyTo); }();
+
     // dfmt off
     auto msg = Msg(
         MsgType.request,
         makeSignature!UArgs,
         () @trusted {
-        return Variant(Tuple!(ulong, WeakAddress, Variant)(r.replyId, r.self.addr.weakRef, Variant(Tuple!UArgs(args))));
+        return Variant(Tuple!(ulong, WeakAddress, Variant)(r.replyId, replyTo, Variant(Tuple!UArgs(args))));
         }()
     );
     // dfmt on
@@ -230,6 +235,8 @@ package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
     auto requestTo = r.rs.requestTo.asRefCounted;
     if (requestTo.empty)
         return; // TODO: should probably be an error sent via onError.
+
+    logger.info(requestTo);
 
     if (!requestTo.isOpen) {
         if (onError)

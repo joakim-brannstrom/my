@@ -54,8 +54,8 @@ struct DelayedMsg {
     Msg msg;
     SysTime triggerAt;
 
-    this(ref return DelayedMsg a) {
-        msg = a.msg;
+    this(const ref return DelayedMsg a) {
+        msg = cast(Msg) a.msg;
         triggerAt = a.triggerAt;
     }
 
@@ -139,7 +139,7 @@ struct Address {
             static assert(0, "msg type not supported " ~ T.stringof);
     }
 
-    package T pop(T)() {
+    package auto pop(T)() @safe {
         static if (is(T : Msg))
             return incoming.pop;
         else static if (is(T : SystemMsg))
@@ -218,9 +218,9 @@ struct StrongAddress {
         // actors. Actors that are never shutdown because they are not detected
         // as "unreachable".
         if (!empty) {
-            () @trusted {
-                printf("b %lx %d %d\n", cast(ulong) addr, addr.refCount, GC.inFinalizer);
-            }();
+            //() @trusted {
+            //    printf("b %lx %d %d\n", cast(ulong) addr, addr.refCount, GC.inFinalizer);
+            //}();
             assert(!GC.inFinalizer,
                     "Error: clean-up of StrongAddress incorrectly"
                     ~ " depends on destructors called by the GC.");

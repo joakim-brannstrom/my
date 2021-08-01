@@ -11,8 +11,38 @@ import core.sync.mutex : Mutex;
  *
  * The value may be `T.init` if multiple consumers try to pop a value at the same time.
  */
-struct Queue(T) {
+struct Queue(RawT) {
     import std.container.dlist : DList;
+
+    static if (is(RawT == U*, U)) {
+        alias T = U;
+        enum AsPointer = true;
+    } else {
+        alias T = RawT;
+        enum AsPointer = false;
+    }
+
+    static struct Item(TT) {
+        private TT ptr;
+
+        ~this() @trusted {
+            if (ptr !is null) {
+                *ptr = T.init;
+                ptr = null;
+            }
+        }
+
+        ref T get() {
+            return *ptr;
+        }
+
+        // Move the value. It is now up to the user to ensure it is destructed.
+        TT unsafeMove() {
+            auto tmp = ptr;
+            ptr = null;
+            return tmp;
+        }
+    }
 
     private {
         Mutex mtx;
@@ -22,32 +52,38 @@ struct Queue(T) {
 
     @disable this(this);
 
-    this(Mutex mtx) {
+    this(Mutex mtx)
+    in (mtx !is null) {
         this.mtx = mtx;
         this.open = true;
     }
 
-    void put(T a) @trusted {
-        synchronized (mtx) {
-            if (open)
-                data.insertBack(new T(a));
+    static if (AsPointer) {
+        void put(T* a) @trusted {
+            synchronized (mtx) {
+                if (open)
+                    data.insertBack(a);
+            }
+        }
+    } else {
+        void put(T a) @trusted {
+            synchronized (mtx) {
+                if (open)
+                    data.insertBack(new T(a));
+            }
         }
     }
 
-    T pop() @trusted scope {
-        import std.algorithm : move;
-
-        T rval;
+    Item!(T*) pop() @trusted scope {
         synchronized (mtx) {
             if (!empty) {
-                move(*data.front, rval);
-                assert(*data.front == T.init);
-                .destroy(data.front);
+                auto tmp = data.front;
                 data.removeFront;
-                //data = data[1 .. $];
+                return typeof(return)(tmp);
             }
         }
-        return rval;
+
+        return typeof(return).init;
     }
 
     bool empty() @safe pure const @nogc {

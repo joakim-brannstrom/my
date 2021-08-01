@@ -300,7 +300,7 @@ class Scheduler {
             Duration nextPoll = pollInterval;
 
             foreach (_; 0 .. runActors) {
-                if (auto a = sched.inactive.pop) {
+                if (auto a = sched.inactive.pop.unsafeMove) {
                     atomicOp!"-="(sched.approxInactive, 1UL);
 
                     void moveToWaiting() {
@@ -337,7 +337,7 @@ class Scheduler {
         }
 
         while (sched.isWatcher) {
-            if (auto a = sched.inactive.pop) {
+            if (auto a = sched.inactive.pop.unsafeMove) {
                 sched.waiting.put(a);
                 sched.wakeup;
             } else {
@@ -448,7 +448,7 @@ class Scheduler {
     }
 
     Actor* pop() {
-        return waiting.pop;
+        return waiting.pop.unsafeMove;
     }
 
     void putWaiting(Actor* a) @safe {

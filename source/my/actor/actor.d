@@ -13,6 +13,7 @@ import logger = std.experimental.logger;
 import std.algorithm : schwartzSort, max, min, among;
 import std.array : empty;
 import std.datetime : SysTime, Clock, dur;
+import std.exception : collectException;
 import std.functional : toDelegate;
 import std.meta : staticMap;
 import std.traits : Parameters, Unqual, ReturnType, isFunctionPointer, isFunction, isDelegate;
@@ -30,6 +31,14 @@ import sumtype;
 private struct PromiseData {
     WeakAddress replyTo;
     ulong replyId;
+
+    /// Copy constructor
+    this(ref return scope typeof(this) rhs) @safe nothrow @nogc {
+        replyTo = rhs.replyTo;
+        replyId = rhs.replyId;
+    }
+
+    @disable this(this);
 }
 
 // deliver can only be called one time.
@@ -49,16 +58,18 @@ struct Promise(T) {
      */
     void deliver(ref T reply) @trusted
     in (!data.empty, "promise must be initialized") {
-        scope (exit)
-            () { data = PromiseData.init; data.release; }();
-
+        logger.info("apa ", data.empty, " ", data.get);
         if (data.empty)
             return;
+
+        scope (exit)
+            () { data = PromiseData.init; data.release; }();
 
         auto replyTo = data.replyTo.asRefCounted;
         // TODO: should probably call delivering actor with an ErrorMsg if replyTo is closed.
         if (replyTo.empty)
             return;
+        logger.info("apa ", replyTo.empty);
 
         if (replyTo.isOpen) {
             enum wrapInTuple = !is(T : Tuple!U, U);
@@ -106,7 +117,7 @@ struct RequestResult(T) {
 
 private alias MsgHandler = void delegate(void* ctx, ref Variant msg) @safe;
 private alias RequestHandler = void delegate(void* ctx, ref Variant msg,
-        ulong replyId, scope WeakAddress replyTo) @safe;
+        ulong replyId, WeakAddress replyTo) @safe;
 private alias ReplyHandler = void delegate(void* ctx, ref Variant msg) @safe;
 
 alias DefaultHandler = void delegate(ref Actor self, ref Variant msg) @safe nothrow;
@@ -212,6 +223,8 @@ private struct AwaitReponse {
 }
 
 struct Actor {
+    import std.container.rbtree : RedBlackTree, redBlackTree;
+
     package StrongAddress addr;
     // visible in the package for logging purpose.
     package ActorState state_;
@@ -229,7 +242,7 @@ struct Actor {
         ulong nextReplyId = 1;
 
         /// Delayed messages ordered by their trigger time.
-        //DelayedMsg[] delayed;
+        //RedBlackTree!(DelayedMsg, "a.triggerAt < b.triggerAt", true) delayed;
 
         /// Used during shutdown to signal monitors and links why this actor is terminating.
         SystemError lastError;
@@ -273,6 +286,8 @@ struct Actor {
     this(StrongAddress a) @trusted {
         addr = a;
         addr.setOpen;
+        //delayed = new typeof(delayed);
+
         errorHandler_ = toDelegate(&defaultErrorHandler);
         downHandler_ = null;
         exitHandler_ = toDelegate(&defaultExitHandler);
@@ -400,13 +415,14 @@ package:
     }
 
     void cleanupDelayed() @trusted nothrow {
-        //foreach (ref a; delayed) {
+        //foreach (const _; 0 .. delayed.length) {
         //    try {
-        //        a.msg = Msg.init;
+        //        delayed.front.msg = Msg.init;
+        //        delayed.removeFront;
         //    } catch (Exception e) {
         //    }
         //}
-        //delayed = null;
+        //.destroy(delayed);
     }
 
     bool isAlive() @safe pure nothrow const @nogc {
@@ -450,41 +466,47 @@ package:
     void process(const SysTime now) @safe nothrow {
         messages_ = 0;
 
-        // philosophy of the order is that a timeout should only trigger if it
-        // is really required thus it is checked last.  This order then mean
-        // that a request may have triggered a timeout but because
-        // `processReply` is called before `checkReplyTimeout` it is *ignored*.
-        // Thus "better to accept even if it is timeout rather than fail".
-        try {
-            processSystemMsg();
-            processDelayed(now);
-            processIncoming();
-            processReply();
-            checkReplyTimeout(now);
-        } catch (Exception e) {
-            exceptionHandler_(this, e);
+        void tick() {
+            // philosophy of the order is that a timeout should only trigger if it
+            // is really required thus it is checked last.  This order then mean
+            // that a request may have triggered a timeout but because
+            // `processReply` is called before `checkReplyTimeout` it is *ignored*.
+            // Thus "better to accept even if it is timeout rather than fail".
+            try {
+                processSystemMsg();
+                processDelayed(now);
+                processIncoming();
+                processReply();
+                checkReplyTimeout(now);
+            } catch (Exception e) {
+                exceptionHandler_(this, e);
+            }
         }
 
         final switch (state_) {
         case ActorState.waiting:
+            tick;
             state_ = ActorState.active;
             break;
         case ActorState.active:
+            tick;
             // self terminate if the actor has no behavior.
-            if (incoming.empty && awaitedResponses.empty
-                    && reqBehavior.empty)
+            if (incoming.empty && awaitedResponses.empty && reqBehavior.empty)
                 state_ = ActorState.forceShutdown;
             break;
         case ActorState.shutdown:
+            tick;
             if (awaitedResponses.empty)
                 state_ = ActorState.finishShutdown;
             cleanupBehavior;
             break;
         case ActorState.forceShutdown:
+            tick;
             state_ = ActorState.finishShutdown;
             cleanupBehavior;
             break;
         case ActorState.finishShutdown:
+            tick;
             state_ = ActorState.stopped;
             addr.setClosed;
             addr.shutdown;
@@ -571,17 +593,18 @@ package:
         auto front = addr().pop!Msg;
 
         void doSend() {
-            if (auto v = front.signature in incoming) {
-                (*v)(front.data);
+            if (auto v = front.get.signature in incoming) {
+                (*v)(front.get.data);
             } else {
-                defaultHandler_(this, front.data);
+                defaultHandler_(this, front.get.data);
             }
         }
 
         void doRequest() @trusted {
-            auto um = front.data.get!(Tuple!(ulong, WeakAddress, Variant));
+            auto um = front.get.data.get!(Tuple!(ulong, WeakAddress, Variant));
+            logger.info(um);
 
-            if (auto v = front.signature in reqBehavior) {
+            if (auto v = front.get.signature in reqBehavior) {
                 (*v)(um[2], um[0], um[1]);
                 //um[1].release;
             } else {
@@ -591,7 +614,7 @@ package:
             //um[2] = um[2].type.init;
         }
 
-        final switch (front.type) {
+        final switch (front.get.type) {
         case MsgType.oneShot:
             doSend();
             break;
@@ -600,12 +623,12 @@ package:
             break;
         }
 
-        () @trusted {
-            logger.info(front);
-            auto v = front.data.get!(Tuple!(StrongAddress))[0];
-            logger.info(v.safeGet.incoming.empty);
-            front.data = front.data.type.init;
-        }();
+        //() @trusted {
+        //    logger.info(front);
+        //    auto v = front.data.get!(Tuple!(StrongAddress))[0];
+        //    logger.info(v.safeGet.incoming.empty);
+        //    front.data = front.data.type.init;
+        //}();
     }
 
     /** All system messages are handled.
@@ -625,7 +648,7 @@ package:
             messages_++;
             auto front = addr().pop!SystemMsg;
 
-            front.match!((ref DownMsg a) {
+            front.get.match!((ref DownMsg a) {
                 if (downHandler_)
                     downHandler_(this, a);
             }, (ref MonitorRequest a) {
@@ -673,51 +696,43 @@ package:
         messages_++;
 
         auto front = addr().pop!Reply;
+        logger.info(front.get.id);
 
-        if (auto v = front.id in awaitedResponses) {
+        if (auto v = front.get.id in awaitedResponses) {
+
             // TODO: reduce the lookups on front.id
-            v.behavior(front.data);
+            v.behavior(front.get.data);
             try {
                 () @trusted { v.behavior.free; }();
             } catch (Exception e) {
             }
-            awaitedResponses.remove(front.id);
-            removeReplyTimeout(front.id);
+            awaitedResponses.remove(front.get.id);
+            removeReplyTimeout(front.get.id);
         } else {
             // TODO: should probably be SystemError.unexpectedResponse?
-            defaultHandler_(this, front.data);
+            defaultHandler_(this, front.get.data);
         }
     }
 
     void processDelayed(const SysTime now) @trusted {
-        if (!addr().empty!DelayedMsg) {
-            // count as a message because handling them are "expensive".
-            // Ignoring the case that the message right away is moved to the
-            // incoming queue. This lead to "double accounting" but ohh well.
-            // Don't use delayedSend when you should have used send.
-            messages_++;
-            //delayed ~= addr.pop!DelayedMsg;
-            //if (delayed.length > 1)
-            //    schwartzSort!(a => a.triggerAt, (a, b) => a < b)(delayed);
-        }
-        //else if (delayed.empty) {
+        //if (!addr().empty!DelayedMsg) {
+        //    // count as a message because handling them are "expensive".
+        //    // Ignoring the case that the message right away is moved to the
+        //    // incoming queue. This lead to "double accounting" but ohh well.
+        //    // Don't use delayedSend when you should have used send.
+        //    messages_++;
+        //    delayed.insert(addr.pop!DelayedMsg);
+        //} else if (delayed.empty) {
         //    return;
         //}
         //
-        //size_t removeTo;
         //foreach (const i; 0 .. delayed.length) {
-        //    if (now > delayed[i].triggerAt) {
-        //        addr.put(delayed[i].msg);
-        //        removeTo = i + 1;
+        //    if (now > delayed.front.triggerAt) {
+        //        addr.put(delayed.front.msg);
+        //        delayed.removeFront;
         //    } else {
         //        break;
         //    }
-        //}
-        //
-        //if (removeTo >= delayed.length) {
-        //    delayed = null;
-        //} else if (removeTo != 0) {
-        //    delayed = delayed[removeTo .. $];
         //}
     }
 
@@ -994,7 +1009,7 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
 
     alias HArgs = staticMap!(Unqual, Params);
 
-    void fn(void* rawCtx, ref Variant msg, ulong replyId, scope WeakAddress replyTo) @trusted {
+    void fn(void* rawCtx, ref Variant msg, ulong replyId, WeakAddress replyTo) @trusted {
         static if (is(CtxT == void)) {
             auto r = handler(msg.get!(Tuple!HArgs).expand);
             //pragma(msg, "setHandler. reuse data");
@@ -1010,6 +1025,7 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
                 sendSystemMsg(replyTo, a);
             }, (Promise!ReqT a) {
                 assert(!a.data.empty, "the promise MUST be constructed before it is returned");
+                logger.info("apa ", replyTo);
                 a.data.replyId = replyId;
                 a.data.replyTo = replyTo;
             }, (data) {
@@ -1025,6 +1041,7 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
                 }
             });
         } else static if (isPromise) {
+            logger.info("apa ", replyTo.unsafePtr);
             r.data.replyId = replyId;
             r.data.replyTo = replyTo;
         } else {
@@ -1043,10 +1060,10 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
                 logger.info("is closed");
             }
 
-            () @trusted {
-                if (!rc.empty)
-                    printf("e %lx %d\n", rc.toHash, rc.refCount);
-            }();
+            //() @trusted {
+            //    if (!rc.empty)
+            //        printf("e %lx %d\n", rc.toHash, rc.refCount);
+            //}();
         }
     }
 
@@ -1271,7 +1288,7 @@ unittest {
     assert(!delayShouldNeverHappen);
 }
 
-@("shall process a request->then chain")
+@("shall process a request->then chain xyz")
 unittest {
     // checking capture is correctly setup/teardown by using captured rc.
 
@@ -1316,6 +1333,10 @@ unittest {
 
     assert(2 == rcReq.refCount);
     assert(1 == rcReply.refCount);
+
+    actor.shutdown;
+    while (actor.isAlive)
+        actor.process(Clock.currTime);
 }
 
 @("shall process a request->then chain using promises")
@@ -1371,6 +1392,11 @@ unittest {
     actor.process(Clock.currTime);
 
     assert(calledReply == 2);
+
+    actor.shutdown;
+    while (actor.isAlive) {
+        actor.process(Clock.currTime);
+    }
 }
 
 /// The timeout triggered.

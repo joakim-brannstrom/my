@@ -62,7 +62,6 @@ private void incrWeakCnt(T)(ref T cb) nothrow {
 
 private void releaseWeakCnt(T)(ref T cb) @trusted
 in (cb.weakCnt >= 0, "Invalid count detected") {
-
     if (cb.weakCnt.atomicOp!"-="(1) == 0) {
         GC.removeRoot(cb);
     }
@@ -104,20 +103,19 @@ struct RefCounted(T) {
         import std.conv : emplace;
 
         impl = alloc();
-        () @trusted { emplace(impl, args); GC.addRoot(impl); }();
         setLocalItem;
     }
 
     this(this) {
-        if (impl) {
+        if (impl)
             incrUseCnt(impl);
-        }
     }
 
     ~this() {
-        if (impl) {
+        if (impl)
             releaseUseCnt(impl);
-        }
+        impl = null;
+        item = null;
     }
 
     /// Set impl to an allocated block of data. It is uninitialized.
@@ -129,7 +127,9 @@ struct RefCounted(T) {
             auto rawMem = new void[Impl.sizeof];
         else
             auto rawMem = new ubyte[Impl.sizeof];
-        return (() @trusted => cast(Impl*) rawMem.ptr)();
+        // only needed for indirections though
+        GC.addRoot(rawMem.ptr);
+        return cast(Impl*) rawMem.ptr;
     }
 
     private void setLocalItem() @trusted {
@@ -248,6 +248,7 @@ struct WeakRef(T) {
         scope (failure)
             releaseWeakCnt(r.impl);
         impl = r.impl;
+        setLocalItem;
     }
 
     this(ref RefCounted!T r) {
@@ -262,13 +263,13 @@ struct WeakRef(T) {
     }
 
     /// Copy constructor
-    //this(ref return scope typeof(this) rhs) {
+    //this(ref return typeof(this) rhs) {
     //    if (rhs.empty)
     //        return;
     //
-    //    incrWeakCnt(r.impl);
+    //    incrWeakCnt(rhs.impl);
     //    scope (failure)
-    //        releaseWeakCnt(r.impl);
+    //        releaseWeakCnt(rhs.impl);
     //    impl = rhs.impl;
     //    setLocalItem;
     //}
@@ -282,6 +283,8 @@ struct WeakRef(T) {
     ~this() @safe {
         if (impl)
             releaseWeakCnt(impl);
+        impl = null;
+        item = null;
     }
 
     private void setLocalItem() @trusted {

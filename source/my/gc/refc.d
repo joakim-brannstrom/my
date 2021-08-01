@@ -18,6 +18,7 @@
  */
 module my.gc.refc;
 
+import logger = std.experimental.logger;
 import core.atomic : atomicOp, atomicLoad, atomicStore, cas;
 import core.memory : GC;
 import std.algorithm : move, swap;
@@ -113,9 +114,10 @@ struct RefCounted(T) {
     }
 
     ~this() {
-        if (impl) {
+        if (impl)
             releaseUseCnt(impl);
-        }
+        impl = null;
+        item = null;
     }
 
     /// Set impl to an allocated block of data. It is uninitialized.
@@ -195,6 +197,7 @@ RefCounted!T refCounted(T)(auto ref T item) {
     return RefCounted!T(item);
 }
 
+@("shall call the destructor when the last ref is destroyed")
 @safe unittest {
     size_t dtorcalled = 0;
     struct S {
@@ -259,15 +262,29 @@ struct WeakRef(T) {
         setLocalItem;
     }
 
+    /// Copy constructor
+    //this(ref return typeof(this) rhs) {
+    //    if (rhs.empty)
+    //        return;
+    //
+    //    incrWeakCnt(rhs.impl);
+    //    scope (failure)
+    //        releaseWeakCnt(rhs.impl);
+    //    impl = rhs.impl;
+    //    setLocalItem;
+    //}
+    //@disable this(this);
+
     this(this) {
         if (impl)
             incrWeakCnt(impl);
     }
 
     ~this() @safe {
-        if (impl) {
+        if (impl)
             releaseWeakCnt(impl);
-        }
+        impl = null;
+        item = null;
     }
 
     private void setLocalItem() @trusted nothrow {
@@ -315,7 +332,7 @@ struct WeakRef(T) {
     }
 }
 
-/// shall only call the destructor one time.
+@("shall only call the destructor one time")
 @safe unittest {
     size_t dtorcalled = 0;
     struct S {
@@ -344,7 +361,7 @@ struct WeakRef(T) {
     assert(dtorcalled == 1);
 }
 
-/// shall destroy the object even though there are cycles because they are WeakRef.
+@("shall destroy the object even though there are cycles because they are WeakRef")
 @safe unittest {
     size_t dtorcalled = 0;
     struct S {
@@ -373,4 +390,71 @@ struct WeakRef(T) {
     }
 
     assert(dtorcalled == 2);
+}
+
+@("shall ref count an object stored in a Variant")
+@system unittest {
+    import std.variant : Variant;
+    import std.typecons : tuple, Tuple;
+
+    static struct S {
+        int x;
+    }
+
+    auto rc = S(42).refCounted;
+
+    {
+        Variant obj;
+
+        obj = rc;
+        assert(rc.refCount == 2, "count incr when stored");
+
+        obj = 42;
+        assert(rc.refCount == 1, "count decrease when obj is destroyed");
+
+        {
+            obj = rc.weakRef;
+            assert(rc.refCount == 1, "the use count did not change");
+            assert(rc.impl.weakCnt == 2, "weak count incr");
+        }
+
+        { // lets get the object back via the weak ref
+            auto tmpRef = obj.get!(WeakRef!S);
+            assert(rc.impl.weakCnt == 3);
+            auto tmpRc = tmpRef.asRefCounted;
+            assert(tmpRc.get.x == 42);
+        }
+        assert(rc.impl.weakCnt == 2);
+    }
+
+    assert(rc.refCount == 1,
+            "when last ref of obj disappears the dtor is called. only one ref left");
+    assert(rc.impl.weakCnt == 1);
+}
+
+@("shall ref count an object stored in nested Variant")
+@system unittest {
+    import std.variant : Variant;
+    import std.typecons : tuple, Tuple;
+
+    static struct S {
+        int x;
+    }
+
+    auto rc = S(42).refCounted;
+
+    {
+        auto obj = Variant(rc.weakRef);
+        assert(rc.refCount == 1, "the use count did not change");
+        assert(rc.impl.weakCnt == 2, "weak count incr");
+
+        { // nested Variants call ctor/dtor as expected
+            auto obj2 = Variant(tuple(42, obj));
+            assert(rc.refCount == 1);
+            assert(rc.impl.weakCnt == 3);
+        }
+    }
+
+    assert(rc.refCount == 1,
+            "when last ref of obj disappears the dtor is called. only one ref left");
 }

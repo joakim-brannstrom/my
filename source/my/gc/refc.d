@@ -275,6 +275,10 @@ struct WeakRef(T) {
             item = &impl.item;
     }
 
+    inout(T*) unsafePtr() inout {
+        return item;
+    }
+
     void opAssign(WeakRef other) @safe nothrow {
         swap(impl, other.impl);
         setLocalItem;

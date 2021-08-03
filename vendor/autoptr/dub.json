@@ -1,0 +1,39 @@
+{
+	"authors": [
+		"Adam Búš"
+	],
+	"buildTypes": {
+		"unittest": {
+			"buildOptions": [
+				"debugMode",
+				"debugInfo",
+				"unittests"
+			],
+			"versions": [
+				"autoptr_count_gc_ranges",
+				"autoptr_track_gc_ranges",
+				"autoptr_track_smart_ptr_lifecycle"
+			]
+		}
+	},
+	"configurations": [
+		{
+			"name": "library",
+			"targetType": "library"
+		}
+	],
+	"copyright": "Copyright © 2021, Adam Búš",
+	"description": "Smart pointers.",
+	"dflags": [
+		""
+	],
+	"importPaths": [
+		"src/"
+	],
+	"license": "Boost Software License - Version 1.0",
+	"name": "autoptr",
+	"sourcePaths": [
+		"src/"
+	],
+	"version": "0.4.10-beta"
+}

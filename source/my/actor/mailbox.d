@@ -10,6 +10,7 @@ import std.datetime : SysTime;
 import std.variant : Variant;
 
 import sumtype;
+import autoptr.shared_ptr;
 
 import my.actor.common;
 import my.gc.refc;
@@ -182,7 +183,7 @@ struct Address {
     }
 }
 
-alias WeakAddress = WeakRef!(Address*);
+alias WeakAddress = SharedPtr!(shared Address*).WeakType;
 
 /** Messages can be sent to a strong address.
  */
@@ -192,21 +193,19 @@ struct StrongAddress {
 @safe:
 
     package {
-        RefCounted!(Address*) addr;
+        SharedPtr!(shared Address*) addr;
     }
 
-    alias safeGet this;
-
+    alias trustedGet this;
     private this(Address* addr) {
-        this.addr = refCounted(addr);
+        this.addr = typeof(addr).make(addr);
 
         //() @trusted { printf("a %lx %d\n", cast(ulong) addr, this.addr.refCount); }();
     }
 
-    package this(RefCounted!(Address*) addr) {
-        this.addr = addr;
-
-        () @trusted { printf("a %lx %d\n", cast(ulong) addr, this.addr.refCount); }();
+    /// Copy constructor
+    this(ref return scope typeof(this) rhs) @safe pure nothrow @nogc {
+        this.addr = rhs.addr;
     }
 
     ~this() @safe nothrow @nogc {
@@ -228,20 +227,20 @@ struct StrongAddress {
     }
 
     package void release() @safe nothrow @nogc {
-        () @trusted {
-            if (!empty)
-                printf("c %lx %d\n", cast(ulong) addr, this.addr.refCount);
-        }();
+        //() @trusted {
+        //    if (!empty)
+        //        printf("c %lx %d\n", cast(ulong) addr, this.addr.refCount);
+        //}();
 
         addr.release;
     }
 
     ulong id() @safe pure nothrow const @nogc {
-        return cast(ulong) addr.unsafePtr;
+        return cast(ulong) addr.toHash;
     }
 
     size_t toHash() @safe pure nothrow const @nogc scope {
-        return cast(size_t) addr.unsafePtr;
+        return cast(size_t) addr.toHash;
     }
 
     void opAssign(StrongAddress rhs) @safe nothrow @nogc {
@@ -256,20 +255,18 @@ struct StrongAddress {
         return addr.empty;
     }
 
-    package Address* unsafeGet() @system pure nothrow @nogc scope return  {
-        return addr.get;
+    WeakAddress weakRef() @safe nothrow {
+        return addr.weak;
     }
 
-    package ref inout(Address) safeGet() inout @safe pure nothrow @nogc scope return  {
-        return *addr.get;
+    package ref inout(Address) trustedGet() inout @safe pure nothrow @nogc scope return  {
+        static import my.alloc.autoptr;
+
+        return *trustedGet(addr);
     }
 
     package ref inout(Address) opCall() inout @safe pure nothrow @nogc scope return  {
-        return safeGet;
-    }
-
-    WeakAddress weakRef() @safe nothrow {
-        return addr.weakRef;
+        return trustedGet;
     }
 }
 

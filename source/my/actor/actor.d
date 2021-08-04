@@ -529,9 +529,9 @@ package:
         // trusted. OK because the constness is just some weird thing with inout and byKey.
         foreach (ref a; monitors.byValue) {
             try {
-                auto rc = a.asRefCounted;
-                if (!rc.empty && rc.isOpen)
-                    rc.put(SystemMsg(msg));
+                auto rc = a.lock;
+                if (rc && rc.trustedGet.isOpen)
+                    rc.trustedGet.put(SystemMsg(msg));
                 a.release;
             } catch (Exception e) {
             }

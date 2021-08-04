@@ -7,6 +7,7 @@ module my.actor.system_msg;
 
 import my.actor.common : SystemError, ExitReason;
 import my.actor.mailbox : WeakAddress;
+import my.typecons : CopyCtor;
 
 /// Sent to all links when an actor is terminated.
 struct ExitMsg {
@@ -15,6 +16,8 @@ struct ExitMsg {
 
     /// The exit reason of the terminated actor.
     SystemError reason;
+
+    mixin CopyCtor;
 }
 
 /// The system signals the actor to shutdown.
@@ -30,6 +33,8 @@ struct DownMsg {
 
     /// The exit reason of the terminated actor.
     SystemError reason;
+
+    mixin CopyCtor;
 }
 
 struct ErrorMsg {
@@ -38,24 +43,30 @@ struct ErrorMsg {
 
     /// The exit reason of the terminated actor.
     SystemError reason;
+
+    mixin CopyCtor;
 }
 
 // Incoming requests to link to the actor using this address.
 struct MonitorRequest {
     WeakAddress addr;
+    mixin CopyCtor;
 }
 
 // Request to remove `addr` as a monitor.
 struct DemonitorRequest {
     WeakAddress addr;
+    mixin CopyCtor;
 }
 
 // Incoming requests to link to the actor using this address.
 struct LinkRequest {
     WeakAddress addr;
+    mixin CopyCtor;
 }
 
 // Request to remove `addr` as a link.
 struct UnlinkRequest {
     WeakAddress addr;
+    mixin CopyCtor;
 }

@@ -15,6 +15,7 @@ import autoptr.shared_ptr;
 import my.actor.common;
 import my.gc.refc;
 public import my.actor.system_msg;
+public import my.alloc.autoptr : trustedGet;
 
 struct Msg {
     MsgType type;
@@ -119,11 +120,11 @@ struct Address {
     }
 
     /// Globally unique ID for the address.
-    ulong id() @safe pure nothrow const @nogc {
+    ulong id() @safe pure nothrow const @nogc shared {
         return id_;
     }
 
-    bool isOpen() @safe pure nothrow const @nogc scope {
+    bool isOpen() @safe pure nothrow const @nogc scope shared {
         return open_;
     }
 

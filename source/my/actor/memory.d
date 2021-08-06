@@ -63,7 +63,9 @@ unittest {
         // adding a StrongAddress is normally blocked by the user BUT the
         // teardown of messages should release it such that it is no longer on
         // the GC.
-        addr.put!Msg(Msg(MsgType.oneShot, 42, Variant(tuple(addr))));
+        auto smurf = tuple(addr.weakRef);
+        auto b = smurf;
+        addr.put!Msg(Msg(MsgType.oneShot, 42, Variant(smurf)));
 
         foreach (_2; 0 .. 5)
             a.process(Clock.currTime);

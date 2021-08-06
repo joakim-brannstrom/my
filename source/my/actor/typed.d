@@ -375,10 +375,10 @@ package StrongAddress underlyingAddress(T)(T address)
         if (is(T == Actor*) || is(T == StrongAddress) || is(T == WeakAddress)
             || isTypedAddress!T || isTypedActorImpl!T) {
     static StrongAddress toStrong(WeakAddress wa) {
-        if (wa.empty)
+        if (!wa)
             return StrongAddress.init;
-        auto rc = wa.asRefCounted;
-        if (rc.empty)
+        auto rc = wa.lock;
+        if (!rc)
             return StrongAddress.init;
         return StrongAddress(rc);
     }

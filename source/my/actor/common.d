@@ -59,26 +59,26 @@ struct Queue(RawT) {
     }
 
     static if (AsPointer) {
-        void put(T* a) @trusted {
+        void put(T* a) @trusted shared {
             synchronized (mtx) {
                 if (open)
-                    data.insertBack(a);
+                    (cast() data).insertBack(a);
             }
         }
     } else {
-        void put(T a) @trusted {
+        void put(T a) @trusted shared {
             synchronized (mtx) {
                 if (open)
-                    data.insertBack(new T(a));
+                    (cast() data).insertBack(new T(a));
             }
         }
     }
 
-    Item!(T*) pop() @trusted scope {
+    Item!(T*) pop() @trusted shared scope {
         synchronized (mtx) {
             if (!empty) {
-                auto tmp = data.front;
-                data.removeFront;
+                auto tmp = (cast() data).front;
+                (cast() data).removeFront;
                 return typeof(return)(tmp);
             }
         }
@@ -86,19 +86,19 @@ struct Queue(RawT) {
         return typeof(return).init;
     }
 
-    bool empty() @safe pure const @nogc {
+    bool empty() @trusted pure const shared @nogc {
         synchronized (mtx) {
-            return data.empty;
+            return (cast() data).empty;
         }
     }
 
     /// clear the queue and permanently shut it down by rejecting put messages.
-    void teardown(void delegate(ref T) deinit) @trusted {
+    void teardown(void delegate(ref T) deinit) @trusted shared {
         synchronized (mtx) {
-            foreach (ref a; data)
+            foreach (ref a; cast() data)
                 deinit(*a);
             open = false;
-            data.clear;
+            (cast() data).clear;
         }
     }
 }

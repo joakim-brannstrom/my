@@ -129,9 +129,10 @@ in (!sendTo.empty, "cannot sent to empty address") {
         return;
 
     auto addr = underlyingAddress(sendTo);
+    static assert(is(typeof(addr) == StrongAddress), "address is " ~ typeof(addr).stringof);
 
     if (!addr.empty && addr.isOpen)
-        addr.put(SystemMsg(msg));
+        addr.trustedGet.put(SystemMsg(msg));
 }
 
 /// Trigger the message in the future.
@@ -232,13 +233,11 @@ private struct ThenContext(Captures...) {
 // escaped.
 package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
         void* ctx, ErrorHandler onError = null) @trusted {
-    auto requestTo = r.rs.requestTo.asRefCounted;
-    if (requestTo.empty)
+    auto requestTo = r.rs.requestTo.lock;
+    if (!requestTo)
         return; // TODO: should probably be an error sent via onError.
 
-    logger.info(requestTo);
-
-    if (!requestTo.isOpen) {
+    if (!requestTo.trustedGet.isOpen) {
         if (onError)
             onError(*r.rs.self, ErrorMsg(r.rs.requestTo, SystemError.requestReceiverDown));
         return;
@@ -259,7 +258,7 @@ package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
     }();
 
     // then send it
-    requestTo.put(r.msg);
+    requestTo.trustedGet.put(r.msg);
 }
 
 void then(T, CtxT = void)(scope RequestSendThen r, T handler, ErrorHandler onError = null) @trusted

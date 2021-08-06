@@ -103,7 +103,7 @@ struct Address {
         return id_.hashOf();
     }
 
-    void shutdown() @safe nothrow {
+    void shutdown() @safe nothrow shared {
         try {
             synchronized (mtx) {
                 incoming.teardown((ref Msg a) { a.data = a.data.type.init; });
@@ -128,7 +128,7 @@ struct Address {
         return open_;
     }
 
-    package void put(T)(T msg) {
+    package void put(T)(T msg) shared {
         static if (is(T : Msg))
             incoming.put(msg);
         else static if (is(T : SystemMsg))
@@ -141,7 +141,7 @@ struct Address {
             static assert(0, "msg type not supported " ~ T.stringof);
     }
 
-    package auto pop(T)() @safe {
+    package auto pop(T)() @safe shared {
         static if (is(T : Msg))
             return incoming.pop;
         else static if (is(T : SystemMsg))
@@ -154,7 +154,7 @@ struct Address {
             static assert(0, "msg type not supported " ~ T.stringof);
     }
 
-    package bool empty(T)() @safe {
+    package bool empty(T)() @safe shared {
         static if (is(T : Msg))
             return incoming.empty;
         else static if (is(T : SystemMsg))
@@ -167,7 +167,7 @@ struct Address {
             static assert(0, "msg type not supported " ~ T.stringof);
     }
 
-    package bool hasMessage() @safe pure nothrow const @nogc {
+    package bool hasMessage() @safe pure nothrow const @nogc shared {
         try {
             return !(incoming.empty && sysMsg.empty && delayed.empty && replies.empty);
         } catch (Exception e) {
@@ -175,11 +175,11 @@ struct Address {
         return false;
     }
 
-    package void setOpen() @safe pure nothrow @nogc {
+    package void setOpen() @safe pure nothrow @nogc shared {
         open_ = true;
     }
 
-    package void setClosed() @safe pure nothrow @nogc {
+    package void setClosed() @safe pure nothrow @nogc shared {
         open_ = false;
     }
 }
@@ -191,17 +191,20 @@ alias WeakAddress = SharedPtr!(shared Address*).WeakType;
 struct StrongAddress {
     import core.stdc.stdio : printf;
 
-@safe:
-
     package {
         SharedPtr!(shared Address*) addr;
     }
 
     alias trustedGet this;
-    private this(Address* addr) {
-        this.addr = typeof(addr).make(addr);
+
+    private this(Address* addr) @trusted {
+        this.addr = typeof(this.addr).make(cast(shared) addr);
 
         //() @trusted { printf("a %lx %d\n", cast(ulong) addr, this.addr.refCount); }();
+    }
+
+    this(typeof(addr) addr) @safe pure nothrow @nogc {
+        this.addr = addr;
     }
 
     /// Copy constructor
@@ -233,7 +236,7 @@ struct StrongAddress {
         //        printf("c %lx %d\n", cast(ulong) addr, this.addr.refCount);
         //}();
 
-        addr.release;
+        addr = null;
     }
 
     ulong id() @safe pure nothrow const @nogc {
@@ -245,28 +248,28 @@ struct StrongAddress {
     }
 
     void opAssign(StrongAddress rhs) @safe nothrow @nogc {
-        () @trusted {
-            if (!empty)
-                printf("d %lx %d\n", cast(ulong) addr, this.addr.refCount);
-        }();
+        //() @trusted {
+        //    if (!empty)
+        //        printf("d %lx %d\n", cast(ulong) addr, this.addr.refCount);
+        //}();
         this.addr = rhs.addr;
     }
 
     bool empty() @safe pure nothrow const @nogc {
-        return addr.empty;
+        return !addr;
     }
 
     WeakAddress weakRef() @safe nothrow {
         return addr.weak;
     }
 
-    package ref inout(Address) trustedGet() inout @safe pure nothrow @nogc scope return  {
+    package ref inout(shared Address) trustedGet() inout @safe pure nothrow @nogc scope return  {
         static import my.alloc.autoptr;
 
-        return *trustedGet(addr);
+        return *my.alloc.autoptr.trustedGet(addr);
     }
 
-    package ref inout(Address) opCall() inout @safe pure nothrow @nogc scope return  {
+    package ref inout(shared Address) opCall() inout @safe pure nothrow @nogc scope return  {
         return trustedGet;
     }
 }

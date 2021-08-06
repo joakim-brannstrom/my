@@ -65,18 +65,17 @@ struct Promise(T) {
         scope (exit)
             () { data = PromiseData.init; data.release; }();
 
-        auto replyTo = data.replyTo.asRefCounted;
+        auto replyTo = data.replyTo.lock;
         // TODO: should probably call delivering actor with an ErrorMsg if replyTo is closed.
-        if (replyTo.empty)
+        if (!replyTo)
             return;
-        logger.info("apa ", replyTo.empty);
 
-        if (replyTo.isOpen) {
+        if (replyTo.trustedGet.isOpen) {
             enum wrapInTuple = !is(T : Tuple!U, U);
             static if (wrapInTuple)
-                replyTo.put(Reply(data.replyId, Variant(tuple(reply))));
+                replyTo.trustedGet.put(Reply(data.replyId, Variant(tuple(reply))));
             else
-                replyTo.put(Reply(data.replyId, Variant(reply)));
+                replyTo.trustedGet.put(Reply(data.replyId, Variant(reply)));
         }
     }
 
@@ -285,7 +284,7 @@ struct Actor {
 
     this(StrongAddress a) @trusted {
         addr = a;
-        addr.setOpen;
+        addr.trustedGet.setOpen;
         //delayed = new typeof(delayed);
 
         errorHandler_ = toDelegate(&defaultErrorHandler);
@@ -532,7 +531,7 @@ package:
                 auto rc = a.lock;
                 if (rc && rc.trustedGet.isOpen)
                     rc.trustedGet.put(SystemMsg(msg));
-                a.release;
+                a = null;
             } catch (Exception e) {
             }
         }
@@ -544,10 +543,10 @@ package:
         // trusted. OK because the constness is just some weird thing with inout and byKey.
         foreach (ref a; links.byValue) {
             try {
-                auto rc = a.asRefCounted;
-                if (!rc.empty && rc.isOpen)
-                    rc.put(SystemMsg(msg));
-                a.release;
+                auto rc = a.lock;
+                if (rc && rc.trustedGet.isOpen)
+                    rc.trustedGet.put(SystemMsg(msg));
+                a = null;
             } catch (Exception e) {
             }
         }
@@ -586,7 +585,7 @@ package:
     }
 
     void processIncoming() @safe {
-        if (addr().empty!Msg)
+        if (addr.trustedGet.empty!Msg)
             return;
         messages_++;
 
@@ -652,18 +651,18 @@ package:
                 if (downHandler_)
                     downHandler_(this, a);
             }, (ref MonitorRequest a) {
-                monitors[cast(size_t) a.addr.unsafePtr] = a.addr;
+                monitors[a.addr.toHash] = a.addr;
             }, (ref DemonitorRequest a) {
-                if (auto v = cast(size_t) a.addr.unsafePtr in monitors)
-                    v.release;
-                monitors.remove(cast(size_t) a.addr.unsafePtr);
+                if (auto v = a.addr.toHash in monitors)
+                    *v = null;
+                monitors.remove(a.addr.toHash);
             }, (ref LinkRequest a) {
-                links[cast(size_t) a.addr.unsafePtr] = a.addr;
+                links[a.addr.toHash] = a.addr;
             }, (ref UnlinkRequest a) {
-                if (auto v = cast(size_t) a.addr.unsafePtr in links)
-                    v.release;
-                links.remove(cast(size_t) a.addr.unsafePtr);
-            }, (ref ErrorMsg a) { errorHandler_(this, a); a.source.release; }, (ref ExitMsg a) {
+                if (auto v = a.addr.toHash in links)
+                    *v = null;
+                links.remove(a.addr.toHash);
+            }, (ref ErrorMsg a) { errorHandler_(this, a); a.source = null; }, (ref ExitMsg a) {
                 exitHandler_(this, a);
             }, (ref SystemExitMsg a) {
                 final switch (a.reason) {
@@ -1021,41 +1020,47 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
 
         static if (isReqResult) {
             r.value.match!((ErrorMsg a) {
+                if (!replyTo)
+                    return;
+
+                auto rc = replyTo.lock;
+                if (!rc)
+                    return;
                 // TODO: replace null with the actor sending the message.
-                sendSystemMsg(replyTo, a);
+                sendSystemMsg(StrongAddress(rc), a);
             }, (Promise!ReqT a) {
                 assert(!a.data.empty, "the promise MUST be constructed before it is returned");
-                logger.info("apa ", replyTo);
+                //logger.info("apa ", replyTo);
                 a.data.replyId = replyId;
                 a.data.replyTo = replyTo;
             }, (data) {
                 // TODO: is this syntax for U one variable or variable. I want it to be variable.
                 enum wrapInTuple = !is(typeof(data) : Tuple!U, U);
-                auto addr = replyTo.asRefCounted;
-                if (!addr.empty && addr.isOpen) {
+                auto addr = replyTo.lock;
+                if (!addr && addr.trustedGet.isOpen) {
                     static if (wrapInTuple)
-                        addr.put(Reply(replyId, Variant(tuple(data))));
+                        addr.trustedGet.put(Reply(replyId, Variant(tuple(data))));
                     else
-                        addr.put(Reply(replyId, Variant(data)));
+                        addr.trustedGet.put(Reply(replyId, Variant(data)));
                 } else {
                 }
             });
         } else static if (isPromise) {
-            logger.info("apa ", replyTo.unsafePtr);
+            //logger.info("apa ", replyTo.unsafePtr);
             r.data.replyId = replyId;
             r.data.replyTo = replyTo;
         } else {
             // TODO: is this syntax for U one variable or variable. I want it to be variable.
             enum wrapInTuple = !is(RType : Tuple!U, U);
-            auto rc = replyTo.asRefCounted;
-            if (rc.empty) {
+            auto rc = replyTo.lock;
+            if (!rc) {
                 logger.info("is empty");
-            } else if (rc.isOpen) {
+            } else if (rc.trustedGet.isOpen) {
                 logger.info("is open");
                 static if (wrapInTuple)
-                    rc.put(Reply(replyId, Variant(tuple(r))));
+                    rc.trustedGet.put(Reply(replyId, Variant(tuple(r))));
                 else
-                    rc.put(Reply(replyId, Variant(r)));
+                    rc.trustedGet.put(Reply(replyId, Variant(r)));
             } else {
                 logger.info("is closed");
             }
@@ -1268,21 +1273,21 @@ unittest {
     delayedSend(actor.address, Clock.currTime - 1.dur!"seconds", "foo");
     delayedSend(actor.address, Clock.currTime + 1.dur!"hours", 42);
 
-    assert(!actor.addressRef.safeGet.empty!DelayedMsg);
-    assert(actor.addressRef.safeGet.empty!Msg);
-    assert(actor.addressRef.safeGet.empty!Reply);
+    assert(!actor.addressRef.trustedGet.empty!DelayedMsg);
+    assert(actor.addressRef.trustedGet.empty!Msg);
+    assert(actor.addressRef.trustedGet.empty!Reply);
 
     actor.process(Clock.currTime);
 
-    assert(!actor.addressRef.safeGet.empty!DelayedMsg);
-    assert(actor.addressRef.safeGet.empty!Msg);
-    assert(actor.addressRef.safeGet.empty!Reply);
+    assert(!actor.addressRef.trustedGet.empty!DelayedMsg);
+    assert(actor.addressRef.trustedGet.empty!Msg);
+    assert(actor.addressRef.trustedGet.empty!Reply);
 
     actor.process(Clock.currTime);
 
-    assert(actor.addressRef.safeGet.empty!DelayedMsg);
-    assert(actor.addressRef.safeGet.empty!Msg);
-    assert(actor.addressRef.safeGet.empty!Reply);
+    assert(actor.addressRef.trustedGet.empty!DelayedMsg);
+    assert(actor.addressRef.trustedGet.empty!Msg);
+    assert(actor.addressRef.trustedGet.empty!Reply);
 
     assert(delayOk);
     assert(!delayShouldNeverHappen);
@@ -1531,8 +1536,8 @@ struct ScopedActor {
             self.data.self.defaultHandler = &self.unknownMsgHandler;
             self.data.self.errorHandler = &self.errorHandler;
 
-            auto requestTo = rs.rs.requestTo.asRefCounted;
-            if (requestTo.empty)
+            auto requestTo = rs.rs.requestTo.lock;
+            if (!requestTo)
                 throw new ScopedActorException(ScopedActorError.down);
 
             // TODO: this loop is stupid... should use a conditional variable
@@ -1544,7 +1549,7 @@ struct ScopedActor {
 
                 if (self.data.errSt == ScopedActorError.none) {
                     dynIntervalSleep;
-                    if (!requestTo.isOpen) {
+                    if (!requestTo.trustedGet.isOpen) {
                         self.data.errSt = ScopedActorError.down;
                     }
                 } else {

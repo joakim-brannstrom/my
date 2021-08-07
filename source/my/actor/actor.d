@@ -650,15 +650,11 @@ package:
             front.get.match!((ref DownMsg a) {
                 if (downHandler_)
                     downHandler_(this, a);
-            }, (ref MonitorRequest a) {
-                monitors[a.addr.toHash] = a.addr;
-            }, (ref DemonitorRequest a) {
+            }, (ref MonitorRequest a) { monitors[a.addr.toHash] = a.addr; }, (ref DemonitorRequest a) {
                 if (auto v = a.addr.toHash in monitors)
                     *v = null;
                 monitors.remove(a.addr.toHash);
-            }, (ref LinkRequest a) {
-                links[a.addr.toHash] = a.addr;
-            }, (ref UnlinkRequest a) {
+            }, (ref LinkRequest a) { links[a.addr.toHash] = a.addr; }, (ref UnlinkRequest a) {
                 if (auto v = a.addr.toHash in links)
                     *v = null;
                 links.remove(a.addr.toHash);

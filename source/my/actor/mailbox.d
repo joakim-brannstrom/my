@@ -5,7 +5,6 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.actor.mailbox;
 
-import logger = std.experimental.logger;
 import core.sync.mutex : Mutex;
 import std.datetime : SysTime;
 import std.variant : Variant;
@@ -32,28 +31,10 @@ struct Msg {
     ulong signature;
     MsgType type;
 
-    //this(MsgType type, ulong signature, Variant data) @trusted {
-    //    this.type = type;
-    //    this.signature = signature;
-    //    () @trusted {logger.info(data);}();
-    //    this.data = data;
-    //    () @trusted {logger.info(this.data);}();
-    //}
-    //
-    //this(typeof(this) rhs) @trusted {
-    //    type = rhs.type;
-    //    signature = rhs.signature;
-    //    () @trusted {logger.info(rhs.data);}();
-    //    data = rhs.data;
-    //    () @trusted {logger.info(data);}();
-    //}
-
     this(ref return typeof(this) rhs) @trusted {
         type = rhs.type;
         signature = rhs.signature;
-        //() @trusted { logger.info(rhs.type); }();
         type = rhs.type;
-        //() @trusted { logger.info(type); }();
     }
 
     @disable this(this);
@@ -230,8 +211,6 @@ struct WeakAddress {
 /** Messages can be sent to a strong address.
  */
 struct StrongAddress {
-    import core.stdc.stdio : printf;
-
     package {
         RefCounted!(Address*) addr;
     }
@@ -239,8 +218,6 @@ struct StrongAddress {
     private this(Address* addr) @trusted
     in (addr !is null) {
         this.addr = refCounted(addr);
-
-        //() @trusted { printf("a %lx %d\n", cast(ulong) addr, this.addr.refCount); }();
     }
 
     this(typeof(addr) addr) @safe nothrow @nogc {
@@ -256,9 +233,6 @@ struct StrongAddress {
         // actors. Actors that are never shutdown because they are not detected
         // as "unreachable".
         if (!empty) {
-            //() @trusted {
-            //    printf("b %lx %d %d\n", cast(ulong) addr, addr.refCount, GC.inFinalizer);
-            //}();
             assert(!GC.inFinalizer,
                     "Error: clean-up of StrongAddress incorrectly"
                     ~ " depends on destructors called by the GC.");
@@ -266,11 +240,6 @@ struct StrongAddress {
     }
 
     void release() @safe nothrow @nogc {
-        //() @trusted {
-        //    if (!empty)
-        //        printf("c %lx %d\n", cast(ulong) addr, this.addr.refCount);
-        //}();
-
         addr.release;
     }
 
@@ -283,10 +252,6 @@ struct StrongAddress {
     }
 
     void opAssign(StrongAddress rhs) @safe nothrow @nogc {
-        //() @trusted {
-        //    if (!empty)
-        //        printf("d %lx %d\n", cast(ulong) addr, this.addr.refCount);
-        //}();
         this.addr = rhs.addr;
     }
 

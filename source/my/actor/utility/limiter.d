@@ -18,8 +18,6 @@ the limier.
 */
 module my.actor.utility.limiter;
 
-import core.atomic : atomicOp;
-import logger = std.experimental.logger;
 import std.array : empty;
 import std.typecons : Tuple, tuple;
 
@@ -65,7 +63,6 @@ FlowControlActor.Impl spawnFlowControl(FlowControlActor.Impl self, const uint to
 
     static RequestResult!Token takeMsg(ref CT ctx, TakeTokenMsg) {
         typeof(return) rval;
-        logger.info("take ", ctx.state.get.tokens);
 
         if (ctx.state.get.tokens > 0) {
             ctx.state.get.tokens--;
@@ -79,7 +76,6 @@ FlowControlActor.Impl spawnFlowControl(FlowControlActor.Impl self, const uint to
     }
 
     static void returnMsg(ref CT ctx, ReturnTokenMsg) {
-        logger.info("return ", ctx.state.get.tokens);
         ctx.state.get.tokens++;
         send(ctx.self, RefreshMsg.init);
     }
@@ -135,7 +131,6 @@ unittest {
             }, capture(st)).set((ref CT ctx, Tick _) {
                 ctx.self.request(ctx.state.get.limiter, infTimeout)
                 .send(TakeTokenMsg.init).capture(ctx).then((ref CT ctx, Token t) {
-                    logger.info("i got token");
                     send(ctx.self, Tick.init);
                     send(ctx.state.get.recv, t, 42);
                 });
@@ -154,7 +149,6 @@ unittest {
             else
                 delayedSend(ctx.self, delay(100.dur!"msecs"), Tick.init);
         }, capture(st), (ref CT ctx, Token t, int _) {
-            logger.info("smurf");
             delayedSend(ctx.limiter, delay(100.dur!"msecs"), ReturnTokenMsg.init);
             ctx.count.get++;
             send(ctx.self, Tick.init);
@@ -170,7 +164,6 @@ unittest {
         send(s, consumer);
 
     while (counter.get < 100 && sw.peek < 4.dur!"seconds") {
-        logger.infof("%s %s", counter.refCount, counter.get);
         Thread.sleep(1.dur!"msecs");
     }
 

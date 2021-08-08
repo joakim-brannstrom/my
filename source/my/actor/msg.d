@@ -5,7 +5,6 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.actor.msg;
 
-import logger = std.experimental.logger;
 import std.meta : staticMap, AliasSeq;
 import std.traits : Unqual, Parameters, isFunction, isFunctionPointer;
 import std.typecons : Tuple, tuple;
@@ -139,7 +138,6 @@ void delayedSend(AddressT, Args...)(AddressT sendTo, SysTime delayTo, auto ref A
         if (is(AddressT == WeakAddress) || is(AddressT == StrongAddress) || is(AddressT == Actor*)) {
     alias UArgs = staticMap!(Unqual, Args);
     auto addr = underlyingAddress(sendTo);
-    logger.infof("hmm %s %s", addr, sendTo);
     if (addr && addr.get.isOpen)
         addr.get.put(DelayedMsg(Msg(makeSignature!UArgs,
                 MsgType(MsgOneShot(Variant(Tuple!UArgs(args))))), delayTo));
@@ -200,17 +198,13 @@ RequestSendThen send(Args...)(RequestSend r, auto ref Args args) {
 
     auto replyTo = r.self.addr.weakRef;
 
-    () @trusted { logger.info(r.self.addr, " ", replyTo); }();
-
     // dfmt off
     auto msg = () @trusted {
-        logger.info(makeSignature!UArgs, " ", MsgType(MsgRequest(replyTo, r.replyId, Variant(tuple(42)))));
         return Msg(
         makeSignature!UArgs,
         MsgType(MsgRequest(replyTo, r.replyId, Variant(Tuple!UArgs(args)))));
     }();
     // dfmt on
-    () @trusted { logger.info(msg); }();
 
     return () @trusted { return RequestSendThen(r, msg); }();
 }
@@ -254,8 +248,6 @@ package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
         SysTime timeout = () @trusted { return r.rs.timeout; }();
         r.rs.self.register(r.rs.replyId, timeout, reply, onError);
     }();
-
-    () @trusted { logger.info(r.msg); }();
 
     // then send it
     requestTo.get.put(r.msg);

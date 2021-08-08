@@ -8,7 +8,6 @@ module my.actor.system;
 import core.sync.mutex : Mutex;
 import core.sync.condition : Condition;
 import core.thread : Thread;
-import logger = std.experimental.logger;
 import std.algorithm : min, max;
 import std.datetime : dur, Clock, Duration;
 import std.parallelism : Task, TaskPool, task;
@@ -412,7 +411,6 @@ class Scheduler {
             foreach (_; 0 .. runActors) {
                 // reduce clock polling
                 const now = Clock.currTime;
-                //writefln("mark %s %s %s", now, lastActive, (now - lastActive));
                 if (auto ctx = sched.pop) {
                     ulong msgs;
                     ulong totalMsgs;
@@ -422,9 +420,7 @@ class Scheduler {
                         totalMsgs += msgs;
                         //writefln("%s tick %s %s", id, ctx.actor.name, msgs);
                     }
-                    while (totalMsgs < maxThroughput && msgs != 0);
-
-                    //writefln("%s done %s %s", id, ctx.actor.name, totalMsgs);
+                    while (totalMsgs < maxThroughput && msgs != 0 && ctx.isAccepting);
 
                     if (totalMsgs == 0) {
                         sched.putInactive(ctx);
@@ -433,22 +429,14 @@ class Scheduler {
                         consecutiveInactive = 0;
                         sched.putWaiting(ctx);
                     }
-
-                    // nice logging. logg this to the actor framework or something
-                    //writeln(ctx.actor, " ", totalMsgs, " ", ctx.isAlive, " ", ctx.actor.addr.isOpen, " ", ctx.actor.state_);
-                    //() @trusted {
-                    //writeln(*ctx.actor);
-                    //}();
                 } else {
                     sched.wait(pollInterval);
-                    //writefln("%s short sleep", id);
                 }
             }
 
             // sleep if it is detected that actors are not sending messages
             if (consecutiveInactive == runActors) {
                 sched.wait(inactiveLimit);
-                //writefln("%s long sleep", id);
             }
         }
 

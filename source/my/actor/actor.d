@@ -5,9 +5,6 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.actor.actor;
 
-import std.stdio;
-import core.stdc.stdio : printf;
-
 import core.thread : Thread;
 import logger = std.experimental.logger;
 import std.algorithm : schwartzSort, max, min, among;
@@ -58,7 +55,6 @@ struct Promise(T) {
      */
     void deliver(ref T reply) @trusted
     in (!data.empty, "promise must be initialized") {
-        logger.info("apa ", data.empty, " ", data.get);
         if (data.empty)
             return;
 
@@ -676,7 +672,6 @@ package:
         messages_++;
 
         auto front = addr().pop!Reply;
-        logger.info(front.get.id);
 
         if (auto v = front.get.id in awaitedResponses) {
 
@@ -695,8 +690,6 @@ package:
     }
 
     void processDelayed(const SysTime now) @trusted {
-        //logger.infof("%s %s %s", name, delayed.length, addr.get.empty!DelayedMsg);
-
         if (!addr.get.empty!DelayedMsg) {
             // count as a message because handling them are "expensive".
             // Ignoring the case that the message right away is moved to the
@@ -1028,30 +1021,19 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
                 }
             });
         } else static if (isPromise) {
-            //logger.info("apa ", replyTo.unsafePtr);
             r.data.get.replyId = replyId;
             r.data.get.replyTo = replyTo;
         } else {
             // TODO: is this syntax for U one variable or variable. I want it to be variable.
             enum wrapInTuple = !is(RType : Tuple!U, U);
-            logger.info(replyTo);
             auto rc = replyTo.lock;
             if (!rc) {
-                logger.info("is empty");
             } else if (rc.get.isOpen) {
-                logger.info("is open");
                 static if (wrapInTuple)
                     rc.get.put(Reply(replyId, Variant(tuple(r))));
                 else
                     rc.get.put(Reply(replyId, Variant(r)));
-            } else {
-                logger.info("is closed");
             }
-
-            //() @trusted {
-            //    if (!rc.empty)
-            //        printf("e %lx %d\n", rc.toHash, rc.refCount);
-            //}();
         }
     }
 
@@ -1294,7 +1276,6 @@ unittest {
     auto rcReply = refCounted(42);
     bool calledReply;
     static void reply(ref Tuple!(bool*, RefCounted!int) ctx, const string s) {
-        logger.info("smurf");
         *ctx[0] = s == "foo";
         assert(2 == ctx[1].refCount);
     }
@@ -1452,12 +1433,10 @@ struct ScopedActor {
     }
 
     private void downHandler(ref Actor, DownMsg) @safe nothrow {
-        logger.info("down").collectException;
         data.get.errSt = ScopedActorError.down;
     }
 
     private void errorHandler(ref Actor, ErrorMsg msg) @safe nothrow {
-        logger.info(msg.reason).collectException;
         if (msg.reason == SystemError.requestTimeout)
             data.get.errSt = ScopedActorError.timeout;
         else

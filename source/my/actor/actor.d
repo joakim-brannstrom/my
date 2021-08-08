@@ -68,7 +68,7 @@ struct Promise(T) {
         if (!data.get.replyTo)
             return;
 
-        auto replyTo = data.get.replyTo.get;
+        auto replyTo = data.get.replyTo.lock;
         // TODO: should probably call delivering actor with an ErrorMsg if replyTo is closed.
         if (!replyTo)
             return;
@@ -369,7 +369,7 @@ struct Actor {
 
 package:
     bool hasMessage() @safe pure nothrow const @nogc {
-        return addr().hasMessage;
+        return addr && addr().hasMessage;
     }
 
     /// How long until a delayed message or a timeout fires.
@@ -443,6 +443,7 @@ package:
         }
     }
 
+    /// Accepting messages.
     bool isAccepting() @safe pure nothrow const @nogc {
         final switch (state_) {
         case ActorState.waiting:
@@ -474,6 +475,7 @@ package:
             // `processReply` is called before `checkReplyTimeout` it is *ignored*.
             // Thus "better to accept even if it is timeout rather than fail".
             try {
+                logger.infof("%X %s", addr.toHash, state_);
                 processSystemMsg();
                 processDelayed(now);
                 processIncoming();
@@ -487,7 +489,9 @@ package:
         final switch (state_) {
         case ActorState.waiting:
             tick;
-            state_ = ActorState.active;
+            // the state can be changed before the actor have executed.
+            if (state_ == ActorState.waiting)
+                state_ = ActorState.active;
             break;
         case ActorState.active:
             tick;
@@ -502,12 +506,10 @@ package:
             cleanupBehavior;
             break;
         case ActorState.forceShutdown:
-            tick;
             state_ = ActorState.finishShutdown;
             cleanupBehavior;
             break;
         case ActorState.finishShutdown:
-            tick;
             state_ = ActorState.stopped;
             addr.get.setClosed;
             addr.get.shutdown;
@@ -530,7 +532,7 @@ package:
         // trusted. OK because the constness is just some weird thing with inout and byKey.
         foreach (ref a; monitors.byValue) {
             try {
-                auto rc = a.get;
+                auto rc = a.lock;
                 if (rc && rc.get.isOpen)
                     rc.get.put(SystemMsg(msg));
                 a.release;
@@ -545,7 +547,7 @@ package:
         // trusted. OK because the constness is just some weird thing with inout and byKey.
         foreach (ref a; links.byValue) {
             try {
-                auto rc = a.get;
+                auto rc = a.lock;
                 if (rc && rc.get.isOpen)
                     rc.get.put(SystemMsg(msg));
                 a.release;
@@ -612,13 +614,6 @@ package:
         front.get.type.match!((ref MsgOneShot a) { doSend(a); }, (ref MsgRequest a) {
             doRequest(a);
         });
-
-        //() @trusted {
-        //    logger.info(front);
-        //    auto v = front.data.get!(Tuple!(StrongAddress))[0];
-        //    logger.info(v.safeGet.incoming.empty);
-        //    front.data = front.data.type.init;
-        //}();
     }
 
     /** All system messages are handled.
@@ -637,6 +632,8 @@ package:
         while (!addr().empty!SystemMsg) {
             messages_++;
             auto front = addr().pop!SystemMsg;
+
+            () @trusted { logger.info(front.get); }();
 
             front.get.match!((ref DownMsg a) {
                 if (downHandler_)
@@ -701,6 +698,8 @@ package:
     }
 
     void processDelayed(const SysTime now) @trusted {
+        //logger.infof("%s %s %s", name, delayed.length, addr.get.empty!DelayedMsg);
+
         if (!addr.get.empty!DelayedMsg) {
             // count as a message because handling them are "expensive".
             // Ignoring the case that the message right away is moved to the
@@ -1010,7 +1009,7 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
                 if (!replyTo)
                     return;
 
-                auto rc = replyTo.get;
+                auto rc = replyTo.lock;
                 if (!rc)
                     return;
                 // TODO: replace null with the actor sending the message.
@@ -1022,7 +1021,7 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
             }, (data) {
                 // TODO: is this syntax for U one variable or variable. I want it to be variable.
                 enum wrapInTuple = !is(typeof(data) : Tuple!U, U);
-                auto addr = replyTo.get;
+                auto addr = replyTo.lock;
                 if (!addr && addr.get.isOpen) {
                     static if (wrapInTuple)
                         addr.get.put(Reply(replyId, Variant(tuple(data))));
@@ -1039,7 +1038,7 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
             // TODO: is this syntax for U one variable or variable. I want it to be variable.
             enum wrapInTuple = !is(RType : Tuple!U, U);
             logger.info(replyTo);
-            auto rc = replyTo.get;
+            auto rc = replyTo.lock;
             if (!rc) {
                 logger.info("is empty");
             } else if (rc.get.isOpen) {
@@ -1450,10 +1449,12 @@ struct ScopedActor {
     }
 
     private void downHandler(ref Actor, DownMsg) @safe nothrow {
+        logger.info("down").collectException;
         data.get.errSt = ScopedActorError.down;
     }
 
     private void errorHandler(ref Actor, ErrorMsg msg) @safe nothrow {
+        logger.info(msg.reason).collectException;
         if (msg.reason == SystemError.requestTimeout)
             data.get.errSt = ScopedActorError.timeout;
         else
@@ -1523,7 +1524,7 @@ struct ScopedActor {
             self.data.get.self.defaultHandler = &self.unknownMsgHandler;
             self.data.get.self.errorHandler = &self.errorHandler;
 
-            auto requestTo = rs.rs.requestTo.get;
+            auto requestTo = rs.rs.requestTo.lock;
             if (!requestTo)
                 throw new ScopedActorException(ScopedActorError.down);
 
@@ -1568,14 +1569,7 @@ unittest {
         }, capture(self), (ref CSelf!() ctx, double x) {}, capture(self),
             (ref CSelf!() ctx, string x) { ctx.self.shutdown; return 42; }, capture(self));
     });
-
-    //auto a0 = sys.spawn((Actor* self) {
-    //    return impl(self, (int x) {
-    //        Thread.sleep(50.dur!"msecs");
-    //        return 42;
-    //    }, (double x) {},
-    //        (string x) { return 42; });
-    //});
+    logger.infof("id of worker is %X", a0.toHash);
 
     {
         logger.info("apa");
@@ -1600,10 +1594,11 @@ unittest {
     {
         auto self = scopedActor;
         bool excThrown;
-        auto stopAt = Clock.currTime + 100.dur!"msecs";
+        auto stopAt = Clock.currTime + 2000.dur!"msecs";
         while (!excThrown && Clock.currTime < stopAt) {
             try {
                 self.request(a0, delay(1.dur!"seconds")).send("hello").then((int x) {
+                    logger.info("is term");
                 });
             } catch (ScopedActorException e) {
                 excThrown = e.error == ScopedActorError.down;

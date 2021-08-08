@@ -245,27 +245,34 @@ class Scheduler {
     /// Watcher will shutdown cleanly if this is false.
     bool isWatcher;
 
+    /// Shutdowner will shutdown cleanly if false;
+    bool isShutdown;
+
     // Workers waiting to be activated
     Mutex waitingWorkerMtx;
     Condition waitingWorker;
 
     // actors waiting to be executed by a worker.
     Queue!(Actor*) waiting;
-    shared ulong approxWaiting;
 
     // Actors waiting for messages to arrive thus they are inactive.
     Queue!(Actor*) inactive;
-    shared ulong approxInactive;
+
+    // Actors that are shutting down.
+    Queue!(Actor*) inShutdown;
 
     Task!(worker, Scheduler, const ulong)*[] workers;
     Task!(watchInactive, Scheduler)* watcher;
+    Task!(watchShutdown, Scheduler)* shutdowner;
 
     this(SystemConfig.Scheduler conf, TaskPool pool) {
         this.conf = conf;
         this.isActive = true;
         this.isWatcher = true;
+        this.isShutdown = true;
         this.waiting = typeof(waiting)(new Mutex);
         this.inactive = typeof(inactive)(new Mutex);
+        this.inShutdown = typeof(inShutdown)(new Mutex);
 
         this.waitingWorkerMtx = new Mutex;
         this.waitingWorker = new Condition(this.waitingWorkerMtx);
@@ -295,25 +302,20 @@ class Scheduler {
         Duration pollInterval = minPoll;
 
         while (sched.isActive) {
-            const runActors = atomicLoad(sched.approxInactive);
+            const runActors = sched.inactive.length;
             ulong inactive;
             Duration nextPoll = pollInterval;
 
             foreach (_; 0 .. runActors) {
                 if (auto a = sched.inactive.pop.unsafeMove) {
-                    atomicOp!"-="(sched.approxInactive, 1UL);
-
-                    void moveToWaiting() {
-                        sched.putWaiting(a);
-                    }
 
                     if (a.hasMessage) {
-                        moveToWaiting;
+                        sched.putWaiting(a);
                     } else {
                         const t = a.nextTimeout(Clock.currTime, maxPoll);
 
                         if (t < minPoll) {
-                            moveToWaiting;
+                            sched.putWaiting(a);
                         } else {
                             sched.putInactive(a);
                             nextPoll = inactive == 0 ? t : min(nextPoll, t);
@@ -336,12 +338,55 @@ class Scheduler {
             }
         }
 
-        while (sched.isWatcher) {
+        while (sched.isWatcher || !sched.inactive.empty) {
             if (auto a = sched.inactive.pop.unsafeMove) {
-                sched.waiting.put(a);
-                sched.wakeup;
+                sched.inShutdown.put(a);
+            }
+        }
+    }
+
+    /// finish shutdown of actors that are shutting down.
+    private static void watchShutdown(Scheduler sched) {
+        const shutdownPoll = sched.conf.pollInterval.orElse(20.dur!"msecs");
+
+        const minPoll = 100.dur!"usecs";
+        const stepPoll = minPoll;
+        const maxPoll = sched.conf.pollInterval.orElse(10.dur!"msecs");
+
+        Duration pollInterval = minPoll;
+
+        while (sched.isActive) {
+            const runActors = sched.inShutdown.length;
+            ulong alive;
+
+            foreach (_; 0 .. runActors) {
+                if (auto a = sched.inShutdown.pop.unsafeMove) {
+                    if (a.isAlive) {
+                        alive++;
+                        a.process(Clock.currTime);
+                        sched.inShutdown.put(a);
+                    } else {
+                        sched.alloc.dispose(a);
+                    }
+                }
+            }
+
+            if (alive == 0) {
+                () @trusted { Thread.sleep(pollInterval); }();
+                pollInterval = max(minPoll, pollInterval + stepPoll);
             } else {
-                () @trusted { Thread.sleep(shutdownPoll); }();
+                pollInterval = minPoll;
+            }
+        }
+
+        while (sched.isShutdown || !sched.inShutdown.empty) {
+            if (auto a = sched.inShutdown.pop.unsafeMove) {
+                if (a.isAlive) {
+                    a.process(Clock.currTime);
+                    sched.inShutdown.put(a);
+                } else {
+                    sched.alloc.dispose(a);
+                }
             }
         }
     }
@@ -356,7 +401,7 @@ class Scheduler {
         const inactiveLimit = min(500.dur!"msecs", pollInterval * 3);
 
         while (sched.isActive) {
-            const runActors = atomicLoad(sched.approxWaiting);
+            const runActors = sched.waiting.length;
             ulong consecutiveInactive;
 
             foreach (_; 0 .. runActors) {
@@ -364,8 +409,6 @@ class Scheduler {
                 const now = Clock.currTime;
                 //writefln("mark %s %s %s", now, lastActive, (now - lastActive));
                 if (auto ctx = sched.pop) {
-                    atomicOp!"-="(sched.approxWaiting, 1);
-
                     ulong msgs;
                     ulong totalMsgs;
                     do {
@@ -405,7 +448,7 @@ class Scheduler {
         }
 
         while (!sched.waiting.empty) {
-            const sleepAfter = atomicLoad(sched.approxWaiting) + 1;
+            const sleepAfter = 1 + sched.waiting.length;
             for (size_t i; i < sleepAfter; ++i) {
                 if (auto ctx = sched.pop) {
                     sendSystemMsgIfEmpty(ctx.address, SystemExitMsg(ExitReason.kill));
@@ -428,6 +471,9 @@ class Scheduler {
         }
         watcher = task!watchInactive(this);
         watcher.executeInNewThread(Thread.PRIORITY_MIN);
+
+        shutdowner = task!watchShutdown(this);
+        shutdowner.executeInNewThread(Thread.PRIORITY_MIN);
     }
 
     void shutdown() {
@@ -445,6 +491,12 @@ class Scheduler {
             watcher.yieldForce;
         } catch (Exception e) {
         }
+
+        isShutdown = false;
+        try {
+            shutdowner.yieldForce;
+        } catch (Exception e) {
+        }
     }
 
     Actor* pop() {
@@ -452,9 +504,10 @@ class Scheduler {
     }
 
     void putWaiting(Actor* a) @safe {
-        if (a.isAlive) {
+        if (a.isAccepting) {
             waiting.put(a);
-            atomicOp!"+="(approxWaiting, 1);
+        } else if (a.isAlive) {
+            inShutdown.put(a);
         } else {
             // TODO: should terminated actors be logged?
             alloc.dispose(a);
@@ -462,7 +515,13 @@ class Scheduler {
     }
 
     void putInactive(Actor* a) @safe {
-        inactive.put(a);
-        atomicOp!"+="(approxInactive, 1);
+        if (a.isAccepting) {
+            inactive.put(a);
+        } else if (a.isAlive) {
+            inShutdown.put(a);
+        } else {
+            // TODO: should terminated actors be logged?
+            alloc.dispose(a);
+        }
     }
 }

@@ -48,6 +48,7 @@ struct Queue(RawT) {
         Mutex mtx;
         DList!(T*) data;
         bool open;
+        size_t length_;
     }
 
     invariant {
@@ -65,15 +66,19 @@ struct Queue(RawT) {
     static if (AsPointer) {
         void put(T* a) @trusted {
             synchronized (mtx) {
-                if (open)
+                if (open) {
                     data.insertBack(a);
+                    length_++;
+                }
             }
         }
     } else {
         void put(T a) @trusted {
             synchronized (mtx) {
-                if (open)
+                if (open) {
                     data.insertBack(new T(a));
+                    length_++;
+                }
             }
         }
     }
@@ -83,6 +88,7 @@ struct Queue(RawT) {
             if (!empty) {
                 auto tmp = data.front;
                 data.removeFront;
+                length_--;
                 return typeof(return)(tmp);
             }
         }
@@ -96,6 +102,12 @@ struct Queue(RawT) {
         }
     }
 
+    size_t length() @trusted pure const @nogc {
+        synchronized (mtx) {
+            return length_;
+        }
+    }
+
     /// clear the queue and permanently shut it down by rejecting put messages.
     void teardown(void delegate(ref T) deinit) @trusted {
         synchronized (mtx) {
@@ -103,6 +115,7 @@ struct Queue(RawT) {
                 deinit(*a);
             open = false;
             data.clear;
+            length_ = 0;
         }
     }
 }

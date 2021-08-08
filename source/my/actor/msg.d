@@ -112,7 +112,7 @@ void demonitor(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
 // Only send the message if the system message queue is empty.
 package void sendSystemMsgIfEmpty(AddressT, T)(AddressT sendTo, T msg) @safe
         if (isAddress!AddressT)
-in (!sendTo.empty, "cannot sent to empty address") {
+in (!sendTo.empty, "cannot send to an empty address") {
     if (sendTo.empty)
         return;
 
@@ -124,12 +124,11 @@ in (!sendTo.empty, "cannot sent to empty address") {
 
 package void sendSystemMsg(AddressT, T)(AddressT sendTo, T msg) @safe
         if (isAddress!AddressT)
-in (!sendTo.empty, "cannot sent to empty address") {
+in (!sendTo.empty, "cannot send to an empty address") {
     if (sendTo.empty)
         return;
 
     auto addr = underlyingAddress(sendTo);
-    static assert(is(typeof(addr) == StrongAddress), "address is " ~ typeof(addr).stringof);
 
     if (addr && addr.get.isOpen)
         addr.get.put(SystemMsg(msg));
@@ -140,6 +139,7 @@ void delayedSend(AddressT, Args...)(AddressT sendTo, SysTime delayTo, auto ref A
         if (is(AddressT == WeakAddress) || is(AddressT == StrongAddress) || is(AddressT == Actor*)) {
     alias UArgs = staticMap!(Unqual, Args);
     auto addr = underlyingAddress(sendTo);
+    logger.infof("hmm %s %s", addr, sendTo);
     if (addr && addr.get.isOpen)
         addr.get.put(DelayedMsg(Msg(makeSignature!UArgs,
                 MsgType(MsgOneShot(Variant(Tuple!UArgs(args))))), delayTo));
@@ -204,7 +204,7 @@ RequestSendThen send(Args...)(RequestSend r, auto ref Args args) {
 
     // dfmt off
     auto msg = () @trusted {
-        logger.info(Variant(tuple(42, replyTo, Variant(42))));
+        logger.info(makeSignature!UArgs, " ", MsgType(MsgRequest(replyTo, r.replyId, Variant(tuple(42)))));
         return Msg(
         makeSignature!UArgs,
         MsgType(MsgRequest(replyTo, r.replyId, Variant(Tuple!UArgs(args)))));
@@ -233,18 +233,16 @@ private struct ThenContext(Captures...) {
 // escaped.
 package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
         void* ctx, ErrorHandler onError = null) @trusted {
-    auto requestTo = r.rs.requestTo.get;
-    if (!requestTo)
+    auto requestTo = r.rs.requestTo.lock;
+    if (!requestTo) {
         return; // TODO: should probably be an error sent via onError.
+    }
 
     if (!requestTo.get.isOpen) {
         if (onError)
             onError(*r.rs.self, ErrorMsg(r.rs.requestTo, SystemError.requestReceiverDown));
         return;
     }
-
-    // why is this inferred as scoped?
-    SysTime timeout = () @trusted { return r.rs.timeout; }();
 
     // first register a handler for the message.
     // this order ensure that there is always a handler that can receive the message.
@@ -256,6 +254,8 @@ package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
         SysTime timeout = () @trusted { return r.rs.timeout; }();
         r.rs.self.register(r.rs.replyId, timeout, reply, onError);
     }();
+
+    () @trusted { logger.info(r.msg); }();
 
     // then send it
     requestTo.get.put(r.msg);

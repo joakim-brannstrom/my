@@ -51,7 +51,8 @@ private void incrUseCnt(T)(ref T cb) nothrow {
 private void releaseUseCnt(T)(ref T cb)
 in (cb.useCnt >= 0, "Invalid count detected") {
     if (cb.useCnt.atomicOp!"-="(1) == 0) {
-        destroy(cb.item);
+        if (!GC.inFinalizer)
+            destroy(cb.item);
         releaseWeakCnt(cb);
     }
 }
@@ -94,11 +95,9 @@ struct RefCounted(T) {
 
     alias Impl = ControlBlock!T;
     private Impl* impl;
-    private T* item;
 
     this(Impl* impl) {
         this.impl = impl;
-        setLocalItem;
     }
 
     this(Args...)(auto ref Args args) {
@@ -108,7 +107,6 @@ struct RefCounted(T) {
                 GC.removeRoot(impl);
             emplace(impl, args);
         }();
-        setLocalItem;
     }
 
     this(this) {
@@ -120,7 +118,6 @@ struct RefCounted(T) {
         if (impl)
             releaseUseCnt(impl);
         impl = null;
-        item = null;
     }
 
     /// Set impl to an allocated block of data. It is uninitialized.
@@ -137,10 +134,9 @@ struct RefCounted(T) {
         return cast(Impl*) rawMem.ptr;
     }
 
-    private void setLocalItem() @trusted {
-        item = null;
-        if (impl)
-            item = &impl.item;
+    private inout(T*) item() inout @trusted
+    in (impl !is null, "not initialized") {
+        return cast(inout(T*)) impl;
     }
 
     inout(T*) unsafePtr() inout {
@@ -158,8 +154,6 @@ struct RefCounted(T) {
 
     void opAssign(RefCounted other) {
         swap(impl, other.impl);
-        other.setLocalItem;
-        setLocalItem;
     }
 
     void opAssign(T other) {
@@ -169,7 +163,6 @@ struct RefCounted(T) {
         } else {
             move(other, impl.item);
         }
-        setLocalItem;
     }
 
     /// Release the reference.
@@ -177,7 +170,6 @@ struct RefCounted(T) {
         if (impl) {
             releaseUseCnt(impl);
             impl = null;
-            item = null;
         }
     }
 
@@ -266,19 +258,6 @@ struct WeakRef(T) {
         incrWeakCnt(r.impl);
         impl = r.impl;
     }
-
-    /// Copy constructor
-    //this(ref return typeof(this) rhs) {
-    //    if (rhs.empty)
-    //        return;
-    //
-    //    incrWeakCnt(rhs.impl);
-    //    scope (failure)
-    //        releaseWeakCnt(rhs.impl);
-    //    impl = rhs.impl;
-    //    setLocalItem;
-    //}
-    //@disable this(this);
 
     this(this) {
         if (impl)

@@ -59,11 +59,13 @@ FlowControlActor.Impl spawnFlowControl(FlowControlActor.Impl self, const uint to
         Promise!Token[] takeReq;
     }
 
+    self.name = "limiter";
     auto st = tuple!("self", "state")(self, refCounted(State(tokens)));
     alias CT = typeof(st);
 
     static RequestResult!Token takeMsg(ref CT ctx, TakeTokenMsg) {
         typeof(return) rval;
+        logger.info("take ", ctx.state.get.tokens);
 
         if (ctx.state.get.tokens > 0) {
             ctx.state.get.tokens--;
@@ -77,6 +79,7 @@ FlowControlActor.Impl spawnFlowControl(FlowControlActor.Impl self, const uint to
     }
 
     static void returnMsg(ref CT ctx, ReturnTokenMsg) {
+        logger.info("return ", ctx.state.get.tokens);
         ctx.state.get.tokens++;
         send(ctx.self, RefreshMsg.init);
     }
@@ -132,6 +135,7 @@ unittest {
             }, capture(st)).set((ref CT ctx, Tick _) {
                 ctx.self.request(ctx.state.get.limiter, infTimeout)
                 .send(TakeTokenMsg.init).capture(ctx).then((ref CT ctx, Token t) {
+                    logger.info("i got token");
                     send(ctx.self, Tick.init);
                     send(ctx.state.get.recv, t, 42);
                 });
@@ -144,27 +148,28 @@ unittest {
         auto st = tuple!("self", "limiter", "count")(self, limiter, counter);
         alias CT = typeof(st);
 
-        return build(self).set((ref CT ctx, Tick _) {
+        return impl(self, (ref CT ctx, Tick _) {
             if (ctx.count.get == 100)
                 ctx.self.shutdown;
             else
                 delayedSend(ctx.self, delay(100.dur!"msecs"), Tick.init);
-        }, capture(st)).set((ref CT ctx, Token t, int _) {
+        }, capture(st), (ref CT ctx, Token t, int _) {
+            logger.info("smurf");
             delayedSend(ctx.limiter, delay(100.dur!"msecs"), ReturnTokenMsg.init);
             ctx.count.get++;
             send(ctx.self, Tick.init);
-        }, capture(st)).finalize;
+        }, capture(st));
     });
 
     foreach (s; senders)
         s.linkTo(consumer);
     limiter.linkTo(consumer);
 
+    auto sw = StopWatch(AutoStart.yes);
     foreach (s; senders)
         send(s, consumer);
 
-    auto sw = StopWatch(AutoStart.yes);
-    while (counter.get < 100 && sw.peek < 1.dur!"seconds") {
+    while (counter.get < 100 && sw.peek < 400.dur!"msecs") {
         logger.infof("%s %s", counter.refCount, counter.get);
         Thread.sleep(1.dur!"msecs");
     }

@@ -51,9 +51,9 @@ struct Msg {
     this(ref return typeof(this) rhs) @trusted {
         type = rhs.type;
         signature = rhs.signature;
-        () @trusted { logger.info(rhs.type); }();
+        //() @trusted { logger.info(rhs.type); }();
         type = rhs.type;
-        () @trusted { logger.info(type); }();
+        //() @trusted { logger.info(type); }();
     }
 
     @disable this(this);
@@ -202,7 +202,7 @@ struct Address {
 struct WeakAddress {
     private WeakRef!(Address*) addr;
 
-    StrongAddress get() @safe nothrow @nogc {
+    StrongAddress lock() @safe nothrow @nogc {
         return StrongAddress(addr.asRefCounted);
     }
 

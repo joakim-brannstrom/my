@@ -347,6 +347,10 @@ class Scheduler {
 
     /// finish shutdown of actors that are shutting down.
     private static void watchShutdown(Scheduler sched) {
+        import my.actor.msg : sendSystemMsgIfEmpty;
+        import my.actor.common : ExitReason;
+        import my.actor.mailbox : SystemExitMsg;
+
         const shutdownPoll = sched.conf.pollInterval.orElse(20.dur!"msecs");
 
         const minPoll = 100.dur!"usecs";
@@ -382,6 +386,7 @@ class Scheduler {
         while (sched.isShutdown || !sched.inShutdown.empty) {
             if (auto a = sched.inShutdown.pop.unsafeMove) {
                 if (a.isAlive) {
+                    sendSystemMsgIfEmpty(a.address, SystemExitMsg(ExitReason.kill));
                     a.process(Clock.currTime);
                     sched.inShutdown.put(a);
                 } else {

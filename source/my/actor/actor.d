@@ -475,7 +475,6 @@ package:
             // `processReply` is called before `checkReplyTimeout` it is *ignored*.
             // Thus "better to accept even if it is timeout rather than fail".
             try {
-                logger.infof("%X %s", addr.toHash, state_);
                 processSystemMsg();
                 processDelayed(now);
                 processIncoming();
@@ -632,8 +631,6 @@ package:
         while (!addr().empty!SystemMsg) {
             messages_++;
             auto front = addr().pop!SystemMsg;
-
-            () @trusted { logger.info(front.get); }();
 
             front.get.match!((ref DownMsg a) {
                 if (downHandler_)
@@ -1022,7 +1019,7 @@ package auto makeRequest(T, CtxT = void)(T handler) @safe {
                 // TODO: is this syntax for U one variable or variable. I want it to be variable.
                 enum wrapInTuple = !is(typeof(data) : Tuple!U, U);
                 auto addr = replyTo.lock;
-                if (!addr && addr.get.isOpen) {
+                if (addr && addr.get.isOpen) {
                     static if (wrapInTuple)
                         addr.get.put(Reply(replyId, Variant(tuple(data))));
                     else
@@ -1428,6 +1425,12 @@ struct ScopedActor {
                 if (self.addr.empty)
                     return;
 
+                () @trusted {
+                    self.downHandler = null;
+                    self.defaultHandler = toDelegate(&.defaultHandler);
+                    self.errorHandler = toDelegate(&defaultErrorHandler);
+                }();
+
                 self.shutdown;
                 while (self.isAlive)
                     self.process(Clock.currTime);
@@ -1560,8 +1563,6 @@ unittest {
 
     auto sys = makeSystem;
 
-    logger.info("apa");
-
     auto a0 = sys.spawn((Actor* self) {
         return impl(self, (ref CSelf!() ctx, int x) {
             Thread.sleep(50.dur!"msecs");
@@ -1569,18 +1570,14 @@ unittest {
         }, capture(self), (ref CSelf!() ctx, double x) {}, capture(self),
             (ref CSelf!() ctx, string x) { ctx.self.shutdown; return 42; }, capture(self));
     });
-    logger.infof("id of worker is %X", a0.toHash);
 
     {
-        logger.info("apa");
         auto self = scopedActor;
         bool excThrown;
-        auto stopAt = Clock.currTime + 1.dur!"seconds";
+        auto stopAt = Clock.currTime + 3.dur!"seconds";
         while (!excThrown && Clock.currTime < stopAt) {
             try {
-                logger.info("apa");
                 self.request(a0, delay(1.dur!"nsecs")).send(42).then((int x) {});
-                logger.info("apa");
             } catch (ScopedActorException e) {
                 excThrown = e.error == ScopedActorError.timeout;
             } catch (Exception e) {
@@ -1589,16 +1586,14 @@ unittest {
         }
         assert(excThrown, "timeout did not trigger as expected");
     }
-    logger.info(".....");
 
     {
         auto self = scopedActor;
         bool excThrown;
-        auto stopAt = Clock.currTime + 2000.dur!"msecs";
+        auto stopAt = Clock.currTime + 3.dur!"seconds";
         while (!excThrown && Clock.currTime < stopAt) {
             try {
                 self.request(a0, delay(1.dur!"seconds")).send("hello").then((int x) {
-                    logger.info("is term");
                 });
             } catch (ScopedActorException e) {
                 excThrown = e.error == ScopedActorError.down;

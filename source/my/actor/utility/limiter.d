@@ -169,7 +169,7 @@ unittest {
     foreach (s; senders)
         send(s, consumer);
 
-    while (counter.get < 100 && sw.peek < 400.dur!"msecs") {
+    while (counter.get < 100 && sw.peek < 4.dur!"seconds") {
         logger.infof("%s %s", counter.refCount, counter.get);
         Thread.sleep(1.dur!"msecs");
     }

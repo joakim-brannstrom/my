@@ -118,8 +118,8 @@ in (!sendTo.empty, "cannot sent to empty address") {
 
     auto addr = underlyingAddress(sendTo);
 
-    if (!addr.empty && addr.isOpen && addr.safeGet.empty!SystemMsg)
-        addr.put(SystemMsg(msg));
+    if (addr && addr.get.isOpen && addr.get.empty!SystemMsg)
+        addr.get.put(SystemMsg(msg));
 }
 
 package void sendSystemMsg(AddressT, T)(AddressT sendTo, T msg) @safe
@@ -131,8 +131,8 @@ in (!sendTo.empty, "cannot sent to empty address") {
     auto addr = underlyingAddress(sendTo);
     static assert(is(typeof(addr) == StrongAddress), "address is " ~ typeof(addr).stringof);
 
-    if (!addr.empty && addr.isOpen)
-        addr.trustedGet.put(SystemMsg(msg));
+    if (addr && addr.get.isOpen)
+        addr.get.put(SystemMsg(msg));
 }
 
 /// Trigger the message in the future.
@@ -140,9 +140,9 @@ void delayedSend(AddressT, Args...)(AddressT sendTo, SysTime delayTo, auto ref A
         if (is(AddressT == WeakAddress) || is(AddressT == StrongAddress) || is(AddressT == Actor*)) {
     alias UArgs = staticMap!(Unqual, Args);
     auto addr = underlyingAddress(sendTo);
-    if (!addr.empty && addr.isOpen)
-        addr.put(DelayedMsg(Msg(MsgType.oneShot, makeSignature!UArgs,
-                Variant(Tuple!UArgs(args))), delayTo));
+    if (addr && addr.get.isOpen)
+        addr.get.put(DelayedMsg(Msg(makeSignature!UArgs,
+                MsgType(MsgOneShot(Variant(Tuple!UArgs(args))))), delayTo));
 }
 
 void sendExit(WeakAddress sendTo, const ExitReason reason) @safe {
@@ -156,8 +156,8 @@ void send(AddressT, Args...)(AddressT sendTo, auto ref Args args) @trusted
         if (isDynamicAddress!AddressT || is(AddressT == Actor*)) {
     alias UArgs = staticMap!(Unqual, Args);
     auto addr = underlyingAddress(sendTo);
-    if (!addr.empty && addr.isOpen)
-        addr.put(Msg(MsgType.oneShot, makeSignature!UArgs, Variant(Tuple!UArgs(args))));
+    if (addr && addr.get.isOpen)
+        addr.get.put(Msg(makeSignature!UArgs, MsgType(MsgOneShot(Variant(Tuple!UArgs(args))))));
 }
 
 package struct RequestSend {
@@ -203,14 +203,14 @@ RequestSendThen send(Args...)(RequestSend r, auto ref Args args) {
     () @trusted { logger.info(r.self.addr, " ", replyTo); }();
 
     // dfmt off
-    auto msg = Msg(
-        MsgType.request,
+    auto msg = () @trusted {
+        logger.info(Variant(tuple(42, replyTo, Variant(42))));
+        return Msg(
         makeSignature!UArgs,
-        () @trusted {
-        return Variant(Tuple!(ulong, WeakAddress, Variant)(r.replyId, replyTo, Variant(Tuple!UArgs(args))));
-        }()
-    );
+        MsgType(MsgRequest(replyTo, r.replyId, Variant(Tuple!UArgs(args)))));
+    }();
     // dfmt on
+    () @trusted { logger.info(msg); }();
 
     return () @trusted { return RequestSendThen(r, msg); }();
 }
@@ -233,11 +233,11 @@ private struct ThenContext(Captures...) {
 // escaped.
 package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
         void* ctx, ErrorHandler onError = null) @trusted {
-    auto requestTo = r.rs.requestTo.lock;
+    auto requestTo = r.rs.requestTo.get;
     if (!requestTo)
         return; // TODO: should probably be an error sent via onError.
 
-    if (!requestTo.trustedGet.isOpen) {
+    if (!requestTo.get.isOpen) {
         if (onError)
             onError(*r.rs.self, ErrorMsg(r.rs.requestTo, SystemError.requestReceiverDown));
         return;
@@ -258,7 +258,7 @@ package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
     }();
 
     // then send it
-    requestTo.trustedGet.put(r.msg);
+    requestTo.get.put(r.msg);
 }
 
 void then(T, CtxT = void)(scope RequestSendThen r, T handler, ErrorHandler onError = null) @trusted

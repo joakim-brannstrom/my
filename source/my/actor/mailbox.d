@@ -5,36 +5,58 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.actor.mailbox;
 
+import logger = std.experimental.logger;
 import core.sync.mutex : Mutex;
 import std.datetime : SysTime;
 import std.variant : Variant;
 
 import sumtype;
-import autoptr.shared_ptr;
 
 import my.actor.common;
 import my.gc.refc;
 public import my.actor.system_msg;
-public import my.alloc.autoptr : trustedGet;
+
+struct MsgOneShot {
+    Variant data;
+}
+
+struct MsgRequest {
+    WeakAddress replyTo;
+    ulong replyId;
+    Variant data;
+}
+
+alias MsgType = SumType!(MsgOneShot, MsgRequest);
 
 struct Msg {
-    MsgType type;
     ulong signature;
-    Variant data;
+    MsgType type;
 
-    /// Copy constructor
-    this(ref return typeof(this) rhs) {
+    //this(MsgType type, ulong signature, Variant data) @trusted {
+    //    this.type = type;
+    //    this.signature = signature;
+    //    () @trusted {logger.info(data);}();
+    //    this.data = data;
+    //    () @trusted {logger.info(this.data);}();
+    //}
+    //
+    //this(typeof(this) rhs) @trusted {
+    //    type = rhs.type;
+    //    signature = rhs.signature;
+    //    () @trusted {logger.info(rhs.data);}();
+    //    data = rhs.data;
+    //    () @trusted {logger.info(data);}();
+    //}
+
+    this(ref return typeof(this) rhs) @trusted {
         type = rhs.type;
         signature = rhs.signature;
-        data = rhs.data;
+        () @trusted { logger.info(rhs.type); }();
+        type = rhs.type;
+        () @trusted { logger.info(type); }();
     }
 
     @disable this(this);
-}
-
-enum MsgType {
-    oneShot,
-    request,
 }
 
 alias SystemMsg = SumType!(ErrorMsg, DownMsg, ExitMsg, SystemExitMsg,
@@ -44,7 +66,7 @@ struct Reply {
     ulong id;
     Variant data;
 
-    this(ref return Reply a) {
+    this(ref return typeof(this) a) {
         id = a.id;
         data = a.data;
     }
@@ -56,9 +78,13 @@ struct DelayedMsg {
     Msg msg;
     SysTime triggerAt;
 
-    this(const ref return DelayedMsg a) {
-        msg = cast(Msg) a.msg;
+    this(ref return DelayedMsg a) @trusted {
+        msg = a.msg;
         triggerAt = a.triggerAt;
+    }
+
+    this(const ref return DelayedMsg a) inout @safe {
+        assert(0, "not supported");
     }
 
     @disable this(this);
@@ -99,18 +125,12 @@ struct Address {
 
     @disable this(this);
 
-    size_t toHash() @safe pure nothrow const @nogc scope {
-        return id_.hashOf();
-    }
-
-    void shutdown() @safe nothrow shared {
+    void shutdown() @safe nothrow {
         try {
             synchronized (mtx) {
-                incoming.teardown((ref Msg a) { a.data = a.data.type.init; });
+                incoming.teardown((ref Msg a) { a.type = MsgType.init; });
                 sysMsg.teardown((ref SystemMsg a) { a = SystemMsg.init; });
-                delayed.teardown((ref DelayedMsg a) {
-                    a.msg.data = a.msg.data.type.init;
-                });
+                delayed.teardown((ref DelayedMsg a) { a.msg.type = MsgType.init; });
                 replies.teardown((ref Reply a) { a.data = a.data.type.init; });
                 open_ = false;
             }
@@ -119,16 +139,11 @@ struct Address {
         }
     }
 
-    /// Globally unique ID for the address.
-    ulong id() @safe pure nothrow const @nogc shared {
-        return id_;
-    }
-
-    bool isOpen() @safe pure nothrow const @nogc scope shared {
+    bool isOpen() @safe pure nothrow const @nogc scope {
         return open_;
     }
 
-    package void put(T)(T msg) shared {
+    package void put(T)(T msg) {
         static if (is(T : Msg))
             incoming.put(msg);
         else static if (is(T : SystemMsg))
@@ -141,7 +156,7 @@ struct Address {
             static assert(0, "msg type not supported " ~ T.stringof);
     }
 
-    package auto pop(T)() @safe shared {
+    package auto pop(T)() @safe {
         static if (is(T : Msg))
             return incoming.pop;
         else static if (is(T : SystemMsg))
@@ -154,7 +169,7 @@ struct Address {
             static assert(0, "msg type not supported " ~ T.stringof);
     }
 
-    package bool empty(T)() @safe shared {
+    package bool empty(T)() @safe {
         static if (is(T : Msg))
             return incoming.empty;
         else static if (is(T : SystemMsg))
@@ -167,7 +182,7 @@ struct Address {
             static assert(0, "msg type not supported " ~ T.stringof);
     }
 
-    package bool hasMessage() @safe pure nothrow const @nogc shared {
+    package bool hasMessage() @safe pure nothrow const @nogc {
         try {
             return !(incoming.empty && sysMsg.empty && delayed.empty && replies.empty);
         } catch (Exception e) {
@@ -175,16 +190,42 @@ struct Address {
         return false;
     }
 
-    package void setOpen() @safe pure nothrow @nogc shared {
+    package void setOpen() @safe pure nothrow @nogc {
         open_ = true;
     }
 
-    package void setClosed() @safe pure nothrow @nogc shared {
+    package void setClosed() @safe pure nothrow @nogc {
         open_ = false;
     }
 }
 
-alias WeakAddress = SharedPtr!(shared Address*).WeakType;
+struct WeakAddress {
+    private WeakRef!(Address*) addr;
+
+    StrongAddress get() @safe nothrow @nogc {
+        return StrongAddress(addr.asRefCounted);
+    }
+
+    T opCast(T : bool)() @safe nothrow const @nogc {
+        return cast(bool) addr;
+    }
+
+    bool empty() @safe nothrow const @nogc {
+        return addr.empty;
+    }
+
+    void opAssign(WeakAddress rhs) @safe nothrow @nogc {
+        this.addr = rhs.addr;
+    }
+
+    size_t toHash() @safe pure nothrow const @nogc scope {
+        return cast(size_t) addr.toHash;
+    }
+
+    void release() @safe nothrow @nogc {
+        addr.release;
+    }
+}
 
 /** Messages can be sent to a strong address.
  */
@@ -192,24 +233,18 @@ struct StrongAddress {
     import core.stdc.stdio : printf;
 
     package {
-        SharedPtr!(shared Address*) addr;
+        RefCounted!(Address*) addr;
     }
 
-    alias trustedGet this;
-
-    private this(Address* addr) @trusted {
-        this.addr = typeof(this.addr).make(cast(shared) addr);
+    private this(Address* addr) @trusted
+    in (addr !is null) {
+        this.addr = refCounted(addr);
 
         //() @trusted { printf("a %lx %d\n", cast(ulong) addr, this.addr.refCount); }();
     }
 
-    this(typeof(addr) addr) @safe pure nothrow @nogc {
+    this(typeof(addr) addr) @safe nothrow @nogc {
         this.addr = addr;
-    }
-
-    /// Copy constructor
-    this(ref return scope typeof(this) rhs) @safe pure nothrow @nogc {
-        this.addr = rhs.addr;
     }
 
     ~this() @safe nothrow @nogc {
@@ -230,13 +265,13 @@ struct StrongAddress {
         }
     }
 
-    package void release() @safe nothrow @nogc {
+    void release() @safe nothrow @nogc {
         //() @trusted {
         //    if (!empty)
         //        printf("c %lx %d\n", cast(ulong) addr, this.addr.refCount);
         //}();
 
-        addr = null;
+        addr.release;
     }
 
     ulong id() @safe pure nothrow const @nogc {
@@ -255,22 +290,24 @@ struct StrongAddress {
         this.addr = rhs.addr;
     }
 
+    T opCast(T : bool)() @safe nothrow const @nogc {
+        return cast(bool) addr;
+    }
+
     bool empty() @safe pure nothrow const @nogc {
         return !addr;
     }
 
     WeakAddress weakRef() @safe nothrow {
-        return addr.weak;
+        return WeakAddress(addr.weakRef);
     }
 
-    package ref inout(shared Address) trustedGet() inout @safe pure nothrow @nogc scope return  {
-        static import my.alloc.autoptr;
-
-        return *my.alloc.autoptr.trustedGet(addr);
+    package ref inout(Address) get() inout @safe pure nothrow @nogc scope return  {
+        return *addr.get;
     }
 
-    package ref inout(shared Address) opCall() inout @safe pure nothrow @nogc scope return  {
-        return trustedGet;
+    package ref inout(Address) opCall() inout @safe pure nothrow @nogc scope return  {
+        return get;
     }
 }
 

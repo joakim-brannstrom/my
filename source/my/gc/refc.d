@@ -90,6 +90,8 @@ in (cb.weakCnt >= 0, "Invalid count detected") {
  * used to prevent the data race.
  */
 struct RefCounted(T) {
+    import std.conv : emplace;
+
     alias Impl = ControlBlock!T;
     private Impl* impl;
     private T* item;
@@ -100,9 +102,12 @@ struct RefCounted(T) {
     }
 
     this(Args...)(auto ref Args args) {
-        import std.conv : emplace;
-
         impl = alloc();
+        () @trusted {
+            scope (failure)
+                GC.removeRoot(impl);
+            emplace(impl, args);
+        }();
         setLocalItem;
     }
 
@@ -123,16 +128,17 @@ struct RefCounted(T) {
         // need to use untyped memory, so we don't get a dtor call by the GC.
         import std.traits : hasIndirections;
 
-        static if (hasIndirections!T)
+        static if (hasIndirections!T) {
             auto rawMem = new void[Impl.sizeof];
-        else
+            GC.addRoot(rawMem.ptr);
+        } else {
             auto rawMem = new ubyte[Impl.sizeof];
-        // only needed for indirections though
-        GC.addRoot(rawMem.ptr);
+        }
         return cast(Impl*) rawMem.ptr;
     }
 
     private void setLocalItem() @trusted {
+        item = null;
         if (impl)
             item = &impl.item;
     }
@@ -146,17 +152,20 @@ struct RefCounted(T) {
         return *item;
     }
 
+    size_t toHash() @safe pure nothrow const @nogc scope {
+        return cast(size_t) impl;
+    }
+
     void opAssign(RefCounted other) {
         swap(impl, other.impl);
+        other.setLocalItem;
         setLocalItem;
     }
 
     void opAssign(T other) {
-        import std.conv : emplace;
-
         if (empty) {
             impl = alloc;
-            () @trusted { emplace(impl, other); GC.addRoot(impl); }();
+            () @trusted { emplace(impl, other); }();
         } else {
             move(other, impl.item);
         }
@@ -168,6 +177,7 @@ struct RefCounted(T) {
         if (impl) {
             releaseUseCnt(impl);
             impl = null;
+            item = null;
         }
     }
 
@@ -183,11 +193,13 @@ struct RefCounted(T) {
         return impl is null;
     }
 
+    T opCast(T : bool)() @safe pure nothrow const @nogc {
+        return !empty;
+    }
+
     WeakRef!T weakRef() {
         return WeakRef!T(this);
     }
-
-    alias get this;
 }
 
 RefCounted!T refCounted(T)(auto ref T item) {
@@ -238,17 +250,13 @@ RefCounted!T refCounted(T)(auto ref T item) {
 struct WeakRef(T) {
     alias Impl = ControlBlock!T;
     private Impl* impl;
-    private T* item;
 
     this(RefCounted!T r) {
         if (r.empty)
             return;
 
         incrWeakCnt(r.impl);
-        scope (failure)
-            releaseWeakCnt(r.impl);
         impl = r.impl;
-        setLocalItem;
     }
 
     this(ref RefCounted!T r) {
@@ -256,10 +264,7 @@ struct WeakRef(T) {
             return;
 
         incrWeakCnt(r.impl);
-        scope (failure)
-            releaseWeakCnt(r.impl);
         impl = r.impl;
-        setLocalItem;
     }
 
     /// Copy constructor
@@ -284,21 +289,14 @@ struct WeakRef(T) {
         if (impl)
             releaseWeakCnt(impl);
         impl = null;
-        item = null;
     }
 
-    private void setLocalItem() @trusted {
-        if (impl)
-            item = &impl.item;
-    }
-
-    inout(T*) unsafePtr() inout {
-        return item;
+    size_t toHash() @safe pure nothrow const @nogc scope {
+        return cast(size_t) impl;
     }
 
     void opAssign(WeakRef other) @safe nothrow {
         swap(impl, other.impl);
-        setLocalItem;
     }
 
     RefCounted!T asRefCounted() nothrow {
@@ -329,6 +327,10 @@ struct WeakRef(T) {
      */
     bool empty() @safe pure nothrow const @nogc {
         return impl is null;
+    }
+
+    T opCast(T : bool)() @safe pure nothrow const @nogc {
+        return !empty;
     }
 }
 
@@ -380,8 +382,8 @@ struct WeakRef(T) {
         auto rc1 = S(1).refCounted;
         auto rc2 = S(2).refCounted;
 
-        rc1.other = rc2.weakRef;
-        rc2.other = rc1.weakRef;
+        rc1.get.other = rc2.weakRef;
+        rc2.get.other = rc1.weakRef;
 
         assert(rc1.impl.useCnt == 1);
         assert(rc1.impl.weakCnt == 2);

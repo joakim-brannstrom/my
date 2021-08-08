@@ -65,7 +65,7 @@ unittest {
         // the GC.
         auto smurf = tuple(addr.weakRef);
         auto b = smurf;
-        addr.put!Msg(Msg(MsgType.oneShot, 42, Variant(smurf)));
+        addr.get.put!Msg(Msg(42, MsgType(MsgOneShot(Variant(smurf)))));
 
         foreach (_2; 0 .. 5)
             a.process(Clock.currTime);

@@ -50,6 +50,10 @@ struct Queue(RawT) {
         bool open;
     }
 
+    invariant {
+        assert(mtx !is null);
+    }
+
     @disable this(this);
 
     this(Mutex mtx)
@@ -59,26 +63,26 @@ struct Queue(RawT) {
     }
 
     static if (AsPointer) {
-        void put(T* a) @trusted shared {
+        void put(T* a) @trusted {
             synchronized (mtx) {
                 if (open)
-                    (cast() data).insertBack(a);
+                    data.insertBack(a);
             }
         }
     } else {
-        void put(T a) @trusted shared {
+        void put(T a) @trusted {
             synchronized (mtx) {
                 if (open)
-                    (cast() data).insertBack(new T(a));
+                    data.insertBack(new T(a));
             }
         }
     }
 
-    Item!(T*) pop() @trusted shared scope {
+    Item!(T*) pop() @trusted scope {
         synchronized (mtx) {
             if (!empty) {
-                auto tmp = (cast() data).front;
-                (cast() data).removeFront;
+                auto tmp = data.front;
+                data.removeFront;
                 return typeof(return)(tmp);
             }
         }
@@ -86,19 +90,19 @@ struct Queue(RawT) {
         return typeof(return).init;
     }
 
-    bool empty() @trusted pure const shared @nogc {
+    bool empty() @trusted pure const @nogc {
         synchronized (mtx) {
-            return (cast() data).empty;
+            return data.empty;
         }
     }
 
     /// clear the queue and permanently shut it down by rejecting put messages.
-    void teardown(void delegate(ref T) deinit) @trusted shared {
+    void teardown(void delegate(ref T) deinit) @trusted {
         synchronized (mtx) {
             foreach (ref a; cast() data)
                 deinit(*a);
             open = false;
-            (cast() data).clear;
+            data.clear;
         }
     }
 }

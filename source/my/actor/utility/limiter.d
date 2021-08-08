@@ -65,27 +65,27 @@ FlowControlActor.Impl spawnFlowControl(FlowControlActor.Impl self, const uint to
     static RequestResult!Token takeMsg(ref CT ctx, TakeTokenMsg) {
         typeof(return) rval;
 
-        if (ctx.state.tokens > 0) {
-            ctx.state.tokens--;
+        if (ctx.state.get.tokens > 0) {
+            ctx.state.get.tokens--;
             rval = typeof(return)(Token.init);
         } else {
             auto p = makePromise!Token;
-            ctx.state.takeReq ~= p;
+            ctx.state.get.takeReq ~= p;
             rval = typeof(return)(p);
         }
         return rval;
     }
 
     static void returnMsg(ref CT ctx, ReturnTokenMsg) {
-        ctx.state.tokens++;
+        ctx.state.get.tokens++;
         send(ctx.self, RefreshMsg.init);
     }
 
     static void refreshMsg(ref CT ctx, RefreshMsg) {
-        while (ctx.state.tokens > 0 && !ctx.state.takeReq.empty) {
-            ctx.state.tokens--;
-            ctx.state.takeReq[$ - 1].deliver(Token.init);
-            ctx.state.takeReq = ctx.state.takeReq[0 .. $ - 1];
+        while (ctx.state.get.tokens > 0 && !ctx.state.get.takeReq.empty) {
+            ctx.state.get.tokens--;
+            ctx.state.get.takeReq[$ - 1].deliver(Token.init);
+            ctx.state.get.takeReq = ctx.state.get.takeReq[0 .. $ - 1];
         }
 
         // extra caution to refresh in case something is missed.
@@ -127,13 +127,13 @@ unittest {
             alias CT = typeof(st);
 
             return build(self).set((ref CT ctx, WeakAddress recv) {
-                ctx.state.recv = recv;
+                ctx.state.get.recv = recv;
                 send(ctx.self.address, Tick.init);
             }, capture(st)).set((ref CT ctx, Tick _) {
-                ctx.self.request(ctx.state.limiter, infTimeout)
+                ctx.self.request(ctx.state.get.limiter, infTimeout)
                 .send(TakeTokenMsg.init).capture(ctx).then((ref CT ctx, Token t) {
                     send(ctx.self, Tick.init);
-                    send(ctx.state.recv, t, 42);
+                    send(ctx.state.get.recv, t, 42);
                 });
             }, capture(st)).finalize;
         });
@@ -145,7 +145,7 @@ unittest {
         alias CT = typeof(st);
 
         return build(self).set((ref CT ctx, Tick _) {
-            if (ctx.count == 100)
+            if (ctx.count.get == 100)
                 ctx.self.shutdown;
             else
                 delayedSend(ctx.self, delay(100.dur!"msecs"), Tick.init);

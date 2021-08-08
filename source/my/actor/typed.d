@@ -377,10 +377,7 @@ package StrongAddress underlyingAddress(T)(T address)
     static StrongAddress toStrong(WeakAddress wa) {
         if (!wa)
             return StrongAddress.init;
-        auto rc = wa.lock;
-        if (!rc)
-            return StrongAddress.init;
-        return StrongAddress(rc);
+        return wa.get;
     }
 
     static if (isTypedAddress!T) {

@@ -106,6 +106,7 @@ struct System {
     // schedule an actor for execution in the thread pool.
     // Returns: the address of the actor.
     private WeakAddress schedule(Actor* actor) @safe {
+        assert(bg.scheduler.isActive);
         actor.setHomeSystem(&this);
         bg.scheduler.putWaiting(actor);
         return actor.address;
@@ -418,9 +419,8 @@ class Scheduler {
                         ctx.process(now);
                         msgs = ctx.messages;
                         totalMsgs += msgs;
-                        //writefln("%s tick %s %s", id, ctx.actor.name, msgs);
                     }
-                    while (totalMsgs < maxThroughput && msgs != 0 && ctx.isAccepting);
+                    while (totalMsgs < maxThroughput && msgs != 0);
 
                     if (totalMsgs == 0) {
                         sched.putInactive(ctx);

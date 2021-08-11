@@ -5,6 +5,7 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.actor.mailbox;
 
+import logger = std.experimental.logger;
 import core.sync.mutex : Mutex;
 import std.datetime : SysTime;
 import std.variant : Variant;
@@ -31,10 +32,9 @@ struct Msg {
     ulong signature;
     MsgType type;
 
-    this(ref return typeof(this) rhs) @trusted {
-        type = rhs.type;
-        signature = rhs.signature;
-        type = rhs.type;
+    this(ref return typeof(this) a) @trusted {
+        signature = a.signature;
+        type = a.type;
     }
 
     @disable this(this);
@@ -77,6 +77,9 @@ struct Address {
         bool open_;
         ulong id_;
         Mutex mtx;
+
+        // only the owner can shutdown the address. used for debugging purpose.
+        ulong owner;
     }
 
     package {
@@ -89,6 +92,11 @@ struct Address {
 
         // Incoming replies on requests.
         Queue!Reply replies;
+    }
+
+    invariant {
+        assert(mtx !is null,
+                "mutex must always be set or the address will fail on sporadic method calls");
     }
 
     private this(Mutex mtx) @safe
@@ -106,66 +114,90 @@ struct Address {
 
     @disable this(this);
 
-    void shutdown() @safe nothrow {
+    void setOwner(ulong x) @safe pure nothrow @nogc {
+        owner = x;
+    }
+
+    void shutdown(void* owner) @safe nothrow
+    in (cast(ulong) owner == this.owner, "only the owner can shutdown an address") {
         try {
             synchronized (mtx) {
+                open_ = false;
                 incoming.teardown((ref Msg a) { a.type = MsgType.init; });
                 sysMsg.teardown((ref SystemMsg a) { a = SystemMsg.init; });
                 delayed.teardown((ref DelayedMsg a) { a.msg.type = MsgType.init; });
                 replies.teardown((ref Reply a) { a.data = a.data.type.init; });
-                open_ = false;
             }
         } catch (Exception e) {
             assert(0, "this should never happen");
         }
     }
 
-    bool isOpen() @safe pure nothrow const @nogc scope {
-        return open_;
-    }
+    package bool put(T)(T msg) {
+        synchronized (mtx) {
+            if (!open_)
+                return false;
 
-    package void put(T)(T msg) {
-        static if (is(T : Msg))
-            incoming.put(msg);
-        else static if (is(T : SystemMsg))
-            sysMsg.put(msg);
-        else static if (is(T : DelayedMsg))
-            delayed.put(msg);
-        else static if (is(T : Reply))
-            replies.put(msg);
-        else
-            static assert(0, "msg type not supported " ~ T.stringof);
+            static if (is(T : Msg))
+                return incoming.put(msg);
+            else static if (is(T : SystemMsg))
+                return sysMsg.put(msg);
+            else static if (is(T : DelayedMsg))
+                return delayed.put(msg);
+            else static if (is(T : Reply))
+                return replies.put(msg);
+            else
+                static assert(0, "msg type not supported " ~ T.stringof);
+        }
     }
 
     package auto pop(T)() @safe {
-        static if (is(T : Msg))
-            return incoming.pop;
-        else static if (is(T : SystemMsg))
-            return sysMsg.pop;
-        else static if (is(T : DelayedMsg))
-            return delayed.pop;
-        else static if (is(T : Reply))
-            return replies.pop;
-        else
-            static assert(0, "msg type not supported " ~ T.stringof);
+        synchronized (mtx) {
+            static if (is(T : Msg)) {
+                if (!open_)
+                    return incoming.PopReturnType.init;
+                return incoming.pop;
+            } else static if (is(T : SystemMsg)) {
+                if (!open_)
+                    return sysMsg.PopReturnType.init;
+                return sysMsg.pop;
+            } else static if (is(T : DelayedMsg)) {
+                if (!open_)
+                    return delayed.PopReturnType.init;
+                return delayed.pop;
+            } else static if (is(T : Reply)) {
+                if (!open_)
+                    return replies.PopReturnType.init;
+                return replies.pop;
+            } else {
+                static assert(0, "msg type not supported " ~ T.stringof);
+            }
+        }
     }
 
     package bool empty(T)() @safe {
-        static if (is(T : Msg))
-            return incoming.empty;
-        else static if (is(T : SystemMsg))
-            return sysMsg.empty;
-        else static if (is(T : DelayedMsg))
-            return delayed.empty;
-        else static if (is(T : Reply))
-            return replies.empty;
-        else
-            static assert(0, "msg type not supported " ~ T.stringof);
+        synchronized (mtx) {
+            if (!open_)
+                return true;
+
+            static if (is(T : Msg))
+                return incoming.empty;
+            else static if (is(T : SystemMsg))
+                return sysMsg.empty;
+            else static if (is(T : DelayedMsg))
+                return delayed.empty;
+            else static if (is(T : Reply))
+                return replies.empty;
+            else
+                static assert(0, "msg type not supported " ~ T.stringof);
+        }
     }
 
     package bool hasMessage() @safe pure nothrow const @nogc {
         try {
-            return !(incoming.empty && sysMsg.empty && delayed.empty && replies.empty);
+            synchronized (mtx) {
+                return !(incoming.empty && sysMsg.empty && delayed.empty && replies.empty);
+            }
         } catch (Exception e) {
         }
         return false;
@@ -267,12 +299,8 @@ struct StrongAddress {
         return WeakAddress(addr.weakRef);
     }
 
-    package ref inout(Address) get() inout @safe pure nothrow @nogc scope return  {
-        return *addr.get;
-    }
-
-    package ref inout(Address) opCall() inout @safe pure nothrow @nogc scope return  {
-        return get;
+    package ref RefCounted!(Address*) get() @safe pure nothrow @nogc scope return  {
+        return addr;
     }
 }
 

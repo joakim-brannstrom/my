@@ -103,8 +103,8 @@ struct RefCounted(T) {
     this(Args...)(auto ref Args args) {
         impl = alloc();
         () @trusted {
-            scope (failure)
-                GC.removeRoot(impl);
+            //scope (failure)
+            //    GC.removeRoot(impl);
             emplace(impl, args);
         }();
     }
@@ -131,7 +131,11 @@ struct RefCounted(T) {
         } else {
             auto rawMem = new ubyte[Impl.sizeof];
         }
-        return cast(Impl*) rawMem.ptr;
+
+        auto rval = cast(Impl*) rawMem.ptr;
+        rval.useCnt = 1;
+        rval.weakCnt = 1;
+        return rval;
     }
 
     private inout(T*) item() inout @trusted
@@ -158,8 +162,9 @@ struct RefCounted(T) {
 
     void opAssign(T other) {
         if (empty) {
-            impl = alloc;
-            () @trusted { emplace(impl, other); }();
+            impl = new Impl(other);
+            //impl = alloc;
+            //() @trusted { emplace(impl, other); }();
         } else {
             move(other, impl.item);
         }

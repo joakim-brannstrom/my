@@ -375,9 +375,9 @@ package StrongAddress underlyingAddress(T)(T address)
         if (is(T == Actor*) || is(T == StrongAddress) || is(T == WeakAddress)
             || isTypedAddress!T || isTypedActorImpl!T) {
     static StrongAddress toStrong(WeakAddress wa) {
-        if (!wa)
-            return StrongAddress.init;
-        return wa.lock;
+        if (auto a = wa.lock)
+            return a;
+        return StrongAddress.init;
     }
 
     static if (isTypedAddress!T) {

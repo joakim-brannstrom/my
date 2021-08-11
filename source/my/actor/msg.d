@@ -68,8 +68,8 @@ void unlinkTo(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
     auto self_ = underlyingAddress(self);
     auto addr = underlyingAddress(sendTo);
 
-    if (self_.empty || addr.empty)
-        return;
+    // do NOT check if the addresses exist becuase it doesn't matter. Just
+    // remove the link.
 
     sendSystemMsg(self_, UnlinkRequest(addr.weakRef));
     sendSystemMsg(addr, UnlinkRequest(self_.weakRef));
@@ -84,13 +84,8 @@ void monitor(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
             || isAddress!AddressT1)) {
     import my.actor.system_msg : MonitorRequest;
 
-    auto self_ = underlyingAddress(self);
-    auto addr = underlyingAddress(sendTo);
-
-    if (self_.empty || addr.empty)
-        return;
-
-    sendSystemMsg(addr, MonitorRequest(self_.weakRef));
+    if (auto self_ = underlyingAddress(self))
+        sendSystemMsg(sendTo, MonitorRequest(self_.weakRef));
 }
 
 /// Remove `self` as a monitor of the actor using `sendTo`.
@@ -99,37 +94,23 @@ void demonitor(AddressT0, AddressT1)(AddressT0 self, AddressT1 sendTo) @safe
             || isAddress!AddressT1)) {
     import my.actor.system_msg : MonitorRequest;
 
-    auto self_ = underlyingAddress(self);
-    auto addr = underlyingAddress(sendTo);
-
-    if (self_.empty || addr.empty)
-        return;
-
-    sendSystemMsg(addr, DemonitorRequest(self_.weakRef));
+    if (auto self_ = underlyingAddress(self))
+        sendSystemMsg(sendTo, DemonitorRequest(self_.weakRef));
 }
 
 // Only send the message if the system message queue is empty.
 package void sendSystemMsgIfEmpty(AddressT, T)(AddressT sendTo, T msg) @safe
         if (isAddress!AddressT)
 in (!sendTo.empty, "cannot send to an empty address") {
-    if (sendTo.empty)
-        return;
-
-    auto addr = underlyingAddress(sendTo);
-
-    if (addr && addr.get.isOpen && addr.get.empty!SystemMsg)
+    auto addr = underlyingAddress(sendTo).get;
+    if (addr && addr.get.empty!SystemMsg)
         addr.get.put(SystemMsg(msg));
 }
 
 package void sendSystemMsg(AddressT, T)(AddressT sendTo, T msg) @safe
         if (isAddress!AddressT)
 in (!sendTo.empty, "cannot send to an empty address") {
-    if (sendTo.empty)
-        return;
-
-    auto addr = underlyingAddress(sendTo);
-
-    if (addr && addr.get.isOpen)
+    if (auto addr = underlyingAddress(sendTo).get)
         addr.get.put(SystemMsg(msg));
 }
 
@@ -137,8 +118,7 @@ in (!sendTo.empty, "cannot send to an empty address") {
 void delayedSend(AddressT, Args...)(AddressT sendTo, SysTime delayTo, auto ref Args args) @trusted
         if (is(AddressT == WeakAddress) || is(AddressT == StrongAddress) || is(AddressT == Actor*)) {
     alias UArgs = staticMap!(Unqual, Args);
-    auto addr = underlyingAddress(sendTo);
-    if (addr && addr.get.isOpen)
+    if (auto addr = underlyingAddress(sendTo).get)
         addr.get.put(DelayedMsg(Msg(makeSignature!UArgs,
                 MsgType(MsgOneShot(Variant(Tuple!UArgs(args))))), delayTo));
 }
@@ -153,8 +133,7 @@ void sendExit(WeakAddress sendTo, const ExitReason reason) @safe {
 void send(AddressT, Args...)(AddressT sendTo, auto ref Args args) @trusted
         if (isDynamicAddress!AddressT || is(AddressT == Actor*)) {
     alias UArgs = staticMap!(Unqual, Args);
-    auto addr = underlyingAddress(sendTo);
-    if (addr && addr.get.isOpen)
+    if (auto addr = underlyingAddress(sendTo).get)
         addr.get.put(Msg(makeSignature!UArgs, MsgType(MsgOneShot(Variant(Tuple!UArgs(args))))));
 }
 
@@ -227,16 +206,15 @@ private struct ThenContext(Captures...) {
 // escaped.
 package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
         void* ctx, ErrorHandler onError = null) @trusted {
-    auto requestTo = r.rs.requestTo.lock;
+    auto requestTo = r.rs.requestTo.lock.get;
     if (!requestTo) {
-        return; // TODO: should probably be an error sent via onError.
-    }
-
-    if (!requestTo.get.isOpen) {
         if (onError)
             onError(*r.rs.self, ErrorMsg(r.rs.requestTo, SystemError.requestReceiverDown));
         return;
     }
+
+    // TODO: compiler bug? how can SysTime be inferred to being scoped?
+    SysTime timeout = () @trusted { return r.rs.timeout; }();
 
     // first register a handler for the message.
     // this order ensure that there is always a handler that can receive the message.
@@ -244,8 +222,6 @@ package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
     () @safe {
         auto reply = makeReply!(T, CtxT)(handler);
         reply.ctx = ctx;
-        // TODO: compiler bug? how can SysTime be inferred to being scoped?
-        SysTime timeout = () @trusted { return r.rs.timeout; }();
         r.rs.self.register(r.rs.replyId, timeout, reply, onError);
     }();
 

@@ -7,14 +7,10 @@ Allocators used by system.
 */
 module my.actor.memory;
 
-import core.sync.mutex : Mutex;
 import logger = std.experimental.logger;
-import std.datetime : Clock;
 
 import my.actor.actor : Actor, ActorState;
 import my.actor.mailbox : StrongAddress, makeAddress2;
-
-import std.stdio;
 
 /** Assuming that the `System` instance ensure that only actors creating with
  * the allocator are deallocated. If everything goes OK it means that an actor
@@ -53,6 +49,7 @@ unittest {
     import core.memory : GC;
     import std.variant;
     import std.typecons;
+    import std.datetime : Clock;
     import my.actor.mailbox;
 
     ActorAlloc aa;
@@ -65,7 +62,7 @@ unittest {
         // the GC.
         auto smurf = tuple(addr.weakRef);
         auto b = smurf;
-        addr.get.put!Msg(Msg(42, MsgType(MsgOneShot(Variant(smurf)))));
+        addr.get.get.put!Msg(Msg(42, MsgType(MsgOneShot(Variant(smurf)))));
 
         foreach (_2; 0 .. 5)
             a.process(Clock.currTime);

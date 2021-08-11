@@ -64,24 +64,28 @@ struct Queue(RawT) {
     }
 
     static if (AsPointer) {
-        void put(T* a) @trusted {
+        bool put(T* a) @trusted {
             synchronized (mtx) {
                 if (open) {
                     data.insertBack(a);
                     length_++;
                 }
+                return open;
             }
         }
     } else {
-        void put(T a) @trusted {
+        bool put(T a) @trusted {
             synchronized (mtx) {
                 if (open) {
                     data.insertBack(new T(a));
                     length_++;
                 }
+                return open;
             }
         }
     }
+
+    alias PopReturnType = Item!(T*);
 
     Item!(T*) pop() @trusted scope {
         synchronized (mtx) {

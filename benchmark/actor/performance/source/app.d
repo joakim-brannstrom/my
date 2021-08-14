@@ -133,7 +133,7 @@ Metric testActorMsg() {
         nrActors++;
 
         Actor* spawnA2(Actor* self) {
-            static void fn(ref Capture!(Actor*, "self", AddressPtr, "a1") c, int x) {
+            static void fn(ref Capture!(Actor*, "self", WeakAddress, "a1") c, int x) {
                 send(c.a1, x);
                 send(c.self.address, x + 1);
                 if (x > 100)
@@ -143,7 +143,7 @@ Metric testActorMsg() {
             return impl(self, &fn, capture(self, a1));
         }
 
-        auto actors = appender!(AddressPtr[])();
+        auto actors = appender!(WeakAddress[])();
         actors.put(a1);
         foreach (_; 0 .. 100) {
             actors.put(sys.spawn(&spawnA2));
@@ -204,7 +204,7 @@ Metric testActorDelayedMsg(Duration delayFor, Duration rate, const ulong dataPoi
             //});
 
             return impl(self, (ref Capture!(Actor*, "self", Duration, "delay",
-                Duration, "rate") ctx, AddressPtr recv) {
+                Duration, "rate") ctx, WeakAddress recv) {
                 delayedSend(recv, delay(ctx.delay), Msg(Clock.currTime + ctx.delay));
                 delayedSend(ctx.self, delay(ctx.rate), recv);
             }, capture(self, delayFor, rate));
@@ -220,7 +220,7 @@ Metric testActorDelayedMsg(Duration delayFor, Duration rate, const ulong dataPoi
             auto st = tuple!("diffs")(refCounted((double[]).init));
             alias CT = typeof(st);
             return impl(self, (ref CT ctx, Duration d) {
-                ctx.diffs ~= d.total!"nsecs";
+                ctx.diffs.get ~= cast(double) d.total!"nsecs";
             }, capture(st), (ref CT ctx, Get _) {
                 auto tmp = ctx.diffs.get.dup;
                 ctx.diffs.get = null;
@@ -228,14 +228,14 @@ Metric testActorDelayedMsg(Duration delayFor, Duration rate, const ulong dataPoi
             }, capture(st));
         });
 
-        auto recv = sys.spawn((Actor* self, AddressPtr collector) {
+        auto recv = sys.spawn((Actor* self, WeakAddress collector) {
             self.name = "recv";
             //self.exitHandler((ref Actor self, ExitMsg m) nothrow{
             //    logger.info("recv exit").collectException;
             //    self.shutdown;
             //});
 
-            return impl(self, (ref Capture!(AddressPtr, "collector") ctx, Msg m) {
+            return impl(self, (ref Capture!(WeakAddress, "collector") ctx, Msg m) {
                 send(ctx.collector, Clock.currTime - m.expectedArrival);
             }, capture(collector));
         }, collector);

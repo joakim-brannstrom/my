@@ -10,6 +10,9 @@ dependency "sumtype" version="~>1.1.2" optional=false default=true
 // copy of sumtype and unit-threaded by adding them as local packages.
 // dub add-local vendor/sumtype 0.9.4
 // dub add-local vendor/silly 1.0.2
+// or
+//subPackage "./vendor/sumtype"
+//dependency "my:sumtype" version="*"
 
 targetPath "build"
 targetType "library"

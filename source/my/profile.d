@@ -23,7 +23,7 @@ ProfileResults getProfileResult() @trusted {
     return new ProfileResults(g.results.dup);
 }
 
-void setProfile(string name, Duration time) @trusted {
+void globalSetProfile(string name, Duration time) @trusted {
     gProfileMtx.lock_nothrow;
     scope (exit)
         gProfileMtx.unlock_nothrow();
@@ -31,7 +31,7 @@ void setProfile(string name, Duration time) @trusted {
     g.set(name, time);
 }
 
-void addProfile(string name, Duration time) @trusted {
+void globalAddProfile(string name, Duration time) @trusted {
     gProfileMtx.lock_nothrow;
     scope (exit)
         gProfileMtx.unlock_nothrow();
@@ -89,10 +89,10 @@ struct Profile {
             if (saveTo is null) {
                 final switch (op) {
                 case Op.set:
-                    setProfile(name, sw.peek);
+                    globalSetProfile(name, sw.peek);
                     break;
                 case Op.add:
-                    addProfile(name, sw.peek);
+                    globalAddProfile(name, sw.peek);
                     break;
                 }
             } else {
@@ -103,11 +103,11 @@ struct Profile {
     }
 }
 
-Profile profileSet(T)(T name, ProfileResults saveTo = null) {
+Profile profileSet(string name, ProfileResults saveTo = null) {
     return Profile(name, Profile.Op.set, saveTo);
 }
 
-Profile profileAdd(T)(T name, ProfileResults saveTo = null) {
+Profile profileAdd(string name, ProfileResults saveTo = null) {
     return Profile(name, Profile.Op.add, saveTo);
 }
 
@@ -192,7 +192,7 @@ class ProfileResults {
         auto app = appender!string;
         formattedWrite(app,
                 "===-------------------------------------------------------------------------===\n");
-        formattedWrite(app, "                         dextool profiling\n");
+        formattedWrite(app, "                                 profiling\n");
         formattedWrite(app,
                 "===-------------------------------------------------------------------------===\n");
         formattedWrite(app, "Total execution time: %.4f seconds\n\n",

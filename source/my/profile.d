@@ -23,7 +23,15 @@ ProfileResults getProfileResult() @trusted {
     return new ProfileResults(g.results.dup);
 }
 
-void putProfile(string name, Duration time) @trusted {
+void setProfile(string name, Duration time) @trusted {
+    gProfileMtx.lock_nothrow;
+    scope (exit)
+        gProfileMtx.unlock_nothrow();
+    auto g = cast() gProfile;
+    g.set(name, time);
+}
+
+void addProfile(string name, Duration time) @trusted {
     gProfileMtx.lock_nothrow;
     scope (exit)
         gProfileMtx.unlock_nothrow();
@@ -46,11 +54,17 @@ shared static this() {
 struct Profile {
     import std.datetime.stopwatch : StopWatch;
 
+    enum Op {
+        add,
+        set
+    }
+
     string name;
     StopWatch sw;
     ProfileResults saveTo;
+    Op op;
 
-    this(T)(T name, ProfileResults saveTo = null) @safe nothrow {
+    this(T)(T name, Op op, ProfileResults saveTo = null) @safe nothrow {
         static if (is(T == string)) {
             this.name = name;
         } else {
@@ -61,6 +75,7 @@ struct Profile {
             }
         }
         this.saveTo = saveTo;
+        this.op = op;
         sw.start;
     }
 
@@ -72,13 +87,28 @@ struct Profile {
         try {
             sw.stop;
             if (saveTo is null) {
-                putProfile(name, sw.peek);
+                final switch (op) {
+                case Op.set:
+                    setProfile(name, sw.peek);
+                    break;
+                case Op.add:
+                    addProfile(name, sw.peek);
+                    break;
+                }
             } else {
                 saveTo.add(name, sw.peek);
             }
         } catch (Exception e) {
         }
     }
+}
+
+Profile profileSet(T)(T name, ProfileResults saveTo = null) {
+    return Profile(name, Profile.Op.set, saveTo);
+}
+
+Profile profileAdd(T)(T name, ProfileResults saveTo = null) {
+    return Profile(name, Profile.Op.add, saveTo);
 }
 
 /** Collect profiling results.
@@ -190,11 +220,11 @@ unittest {
     auto pc = new ProfileResults;
 
     foreach (_; 0 .. 10)
-        auto p = Profile("a", pc);
+        auto p = profileSet("a", pc);
     assert(pc.toRows.length == 1);
 
     foreach (i; 0 .. 10)
-        auto p = Profile("a" ~ i.to!string, pc);
+        auto p = profileAdd("a" ~ i.to!string, pc);
     assert(pc.toRows.length == 11);
 
     writeln(pc);

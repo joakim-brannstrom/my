@@ -4,8 +4,6 @@ authors "Joakim Brännström"
 copyright "Copyright © 2019, Joakim Brännström"
 license "BSL-1.0"
 
-dependency "sumtype" version="~>1.2.4" optional=false default=true
-
 targetPath "build"
 targetType "library"
 

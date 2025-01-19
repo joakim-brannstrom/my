@@ -8,7 +8,7 @@ targetPath "build"
 targetType "library"
 
 configuration "default" {
-    dflags "-preview=dip1000" "-preview=dip1008"
+    dflags "-preview=dip1008" "-preview=dip1000"
 }
 
 configuration "nodip" {
@@ -16,7 +16,7 @@ configuration "nodip" {
 
 configuration "unittest" {
     dependency "silly" version="~>1.0.2"
-    dflags "-preview=dip1000" "-preview=dip1008" "-verrors=context" platform="dmd"
+    dflags "-preview=dip1008" "-preview=dip1000" "-verrors=context" platform="dmd"
     dflags "--verrors-context" platform="ldc"
     //dflags "-checkaction=context"
 }

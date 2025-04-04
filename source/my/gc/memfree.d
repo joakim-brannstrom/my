@@ -14,7 +14,7 @@ import std.typecons : SafeRefCounted;
 import my.libc;
 
 /// Returns: a started instance of MemFree.
-MemFree memFree() @trusted {
+MemFree memFree() @safe {
     return MemFree(true);
 }
 
@@ -33,24 +33,18 @@ struct MemFree {
 
     private SafeRefCounted!Data data;
 
-    this(bool startNow) @safe nothrow {
-        try {
-            if (startNow)
-                start;
-        } catch(Exception e) {
-        }
+    this(bool startNow) @safe {
+        if (startNow)
+            start;
     }
 
-    ~this() @trusted nothrow {
+    ~this() @trusted {
         if (!data.refCountedStore.isInitialized || !data.isRunning)
             return;
 
         scope (exit)
             data.isRunning = false;
-        try {
-            send(data.bg, Msg.stop);
-        } catch(Exception e) {
-        }
+        send(data.bg, Msg.stop);
     }
 
     /** Start a background thread to do the work.

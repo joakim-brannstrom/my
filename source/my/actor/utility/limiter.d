@@ -91,7 +91,7 @@ FlowControlActor.Impl spawnFlowControl(FlowControlActor.Impl self, const uint to
         delayedSend(ctx.self, delay(50.dur!"msecs"), RefreshMsg.init);
     }
 
-    return impl(self, &takeMsg, capture(st), &returnMsg, capture(st), &refreshMsg, capture(st));
+    return impl(self, capture(st), &takeMsg, &returnMsg, &refreshMsg);
 }
 
 @("shall limit the message rate of senders by using a limiter to control the flow")
@@ -126,16 +126,16 @@ unittest {
                 safeRefCounted(State(WeakAddress.init, limiter)));
             alias CT = typeof(st);
 
-            return build(self).set((ref CT ctx, WeakAddress recv) {
+            return build(self).set("actor", (ref CT ctx, WeakAddress recv) {
                 ctx.state.recv = recv;
                 send(ctx.self.address, Tick.init);
-            }, capture(st)).set((ref CT ctx, Tick _) {
+            }).set("actor", (ref CT ctx, Tick _) {
                 ctx.self.request(ctx.state.limiter, infTimeout)
                 .send(TakeTokenMsg.init).capture(ctx).then((ref CT ctx, Token t) {
                     send(ctx.self, Tick.init);
                     send(ctx.state.recv, t, 42);
                 });
-            }, capture(st)).finalize;
+            }).context(capture(st)).finalize;
         });
     }
 
@@ -144,16 +144,16 @@ unittest {
         auto st = tuple!("self", "limiter", "count")(self, limiter, counter);
         alias CT = typeof(st);
 
-        return impl(self, (ref CT ctx, Tick _) {
+        return impl(self, capture(st), (ref CT ctx, Tick _) {
             if (ctx.count == 100)
                 ctx.self.shutdown;
             else
                 delayedSend(ctx.self, delay(100.dur!"msecs"), Tick.init);
-        }, capture(st), (ref CT ctx, Token t, int _) {
+        }, (ref CT ctx, Token t, int _) {
             delayedSend(ctx.limiter, delay(100.dur!"msecs"), ReturnTokenMsg.init);
             ctx.count++;
             send(ctx.self, Tick.init);
-        }, capture(st));
+        });
     });
 
     foreach (s; senders)

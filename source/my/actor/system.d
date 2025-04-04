@@ -144,7 +144,8 @@ struct System {
             (*c.hasExecutedWith42)++;
     }
 
-    auto addr = sys.spawn((Actor* a) => build(a).set(&fn, capture(&hasExecutedWith42)).finalize);
+    auto addr = sys.spawn((Actor* a) => build(a).set("actor", &fn)
+            .context(capture(&hasExecutedWith42)).finalize);
     send(addr, 42);
     send(addr, 43);
 
@@ -170,7 +171,7 @@ unittest {
 
     auto addr = sys.spawn((Actor* self) {
         send(self, 42);
-        return impl(self, &fn, capture(&hasExecutedWith42));
+        return impl(self, capture(&hasExecutedWith42), &fn);
     });
     send(addr, 42);
     send(addr, 43);
@@ -199,7 +200,8 @@ unittest {
 
     // final result from A2's continuation.
     auto spawnA2(A2.Impl self) {
-        return my.actor.typed.impl(self, (ref Capture!(A2.Impl, "self", A1.Address, "a1") c, int x) {
+        return my.actor.typed.impl(self, capture(self, a1),
+                (ref Capture!(A2.Impl, "self", A1.Address, "a1") c, int x) {
             auto p = makePromise!int;
             // dfmt off
             c.self.request(c.a1, infTimeout)
@@ -208,7 +210,7 @@ unittest {
                 .then((ref Tuple!(Promise!int, "p") ctx, int a) { ctx.p.deliver(a); });
             // dfmt on
             return p;
-        }, capture(self, a1));
+        });
     }
 
     auto a2 = sys.spawn(&spawnA2);

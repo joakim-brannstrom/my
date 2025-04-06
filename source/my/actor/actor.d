@@ -653,6 +653,8 @@ package:
             .destroy(front);
 
         void doSend(ref MsgOneShot msg) @trusted {
+            debug logger.trace("tick ", front.get.signature);
+            debug logger.trace(" incoming2: ", incoming2);
             if (auto v = front.get.signature in incoming2) {
                 debug {
                     logger.tracef("%X [%s] incoming %s", id, name, v.name).collectException;
@@ -971,11 +973,13 @@ package auto makeAction2(T, CtxT = void)(T handler) @safe
     else {
         alias CtxParam = Parameters!T[0];
         alias Params = Parameters!T[1 .. $];
-        // checkMatchingCtx!(CtxParam, CtxT);
+        checkMatchingCtx!(CtxParam, CtxT);
         checkRefForContext!handler;
     }
 
     alias HArgs = staticMap!(Unqual, Params);
+    pragma(msg, CtxT);
+    pragma(msg, Params);
 
     void fn(void* ctx, ref Variant msg) @trusted {
         static if (is(CtxT == void)) {
@@ -1224,7 +1228,7 @@ unittest {
     assert(count == 1);
 }
 
-private struct BuildActor {
+private struct BuildActor(CtxT = void) {
     Actor* actor;
 
     Actor* finalize() @safe {
@@ -1260,12 +1264,12 @@ private struct BuildActor {
 
     auto context(CtxT)(CtxT ctx) {
         actor.setContext(cast(void*) new CtxT(ctx), &cleanupCtx!CtxT);
-        return this;
+        return BuildActor!CtxT(actor);
     }
 
     auto context(CtxT)(CtxT* ctx) {
         actor.setContext(cast(void*) ctx, &cleanupCtx!CtxT);
-        return this;
+        return BuildActor!CtxT(actor);
     }
 
     auto set(BehaviorT)(string name, BehaviorT behavior)
@@ -1279,14 +1283,22 @@ private struct BuildActor {
     auto set(BehaviorT)(string name, BehaviorT behavior)
             if ((isFunction!BehaviorT || isFunctionPointer!BehaviorT)
                 && is(ReturnType!BehaviorT == void)) {
-        auto act = makeAction2(behavior);
+        auto act = makeAction2!(BehaviorT, CtxT)(behavior);
+        actor.register(name, act.signature, act.action);
+        return this;
+    }
+
+    auto set(BehaviorT, CtxT)(string name, BehaviorT behavior)
+            if ((isFunction!BehaviorT || isFunctionPointer!BehaviorT)
+                && is(ReturnType!BehaviorT == void)) {
+        auto act = makeAction2!(BehaviorT, CtxT)(behavior);
         actor.register(name, act.signature, act.action);
         return this;
     }
 }
 
-package BuildActor build(Actor* a) @safe {
-    return BuildActor(a);
+package BuildActor!void build(Actor* a) @safe {
+    return typeof(return)(a);
 }
 
 /// Implement an actor.
@@ -1309,7 +1321,6 @@ Actor* impl(Behavior...)(Actor* self, Behavior behaviors) {
     static foreach (const i; startIdx .. Behavior.length) {
         {
             alias b = Behavior[i];
-
             static if (!(isFunction!(b) || isFunctionPointer!(b)))
                 static assert(0, "behavior may only be functions, not delgates: " ~ b.stringof);
 
@@ -1337,14 +1348,63 @@ unittest {
     auto a1 = build(&aa1).set("a1", &fn3).set("a1", &fn4).set("a1", &fn5).finalize;
 }
 
+shared static this() {
+    version (unittest) {
+        import logger = std.logger;
+
+        logger.globalLogLevel = logger.LogLevel.all;
+        (cast() logger.sharedLog).logLevel = logger.LogLevel.all;
+    }
+}
+
+@("shall receive the sent message")
+unittest {
+    bool sendOk;
+    static void fn1(ref Tuple!(bool*, "sendOk", bool*, "shouldNeverHappen") c, const string s) @safe {
+        *c.sendOk = true;
+    }
+
+    bool shouldNeverHappen;
+    static void fn2(ref Tuple!(bool*, "shouldNeverHappen", bool*, "shouldNeverHappen") c, int s) @safe {
+        *c.shouldNeverHappen = true;
+    }
+
+    auto aa1 = Actor(makeAddress2);
+    auto actor = build(&aa1).context(capture(&sendOk, &shouldNeverHappen))
+        .set("actor", &fn1).set("actor", &fn2).finalize;
+    send(actor.address, "foo");
+    send(actor.address, 42);
+
+    assert(actor.addressRef.get.empty!DelayedMsg);
+    assert(!actor.addressRef.get.empty!Msg);
+    assert(actor.addressRef.get.empty!Reply);
+
+    foreach (_; 0 .. 10)
+        actor.process(Clock.currTime);
+
+    assert(actor.addressRef.get.empty!DelayedMsg);
+    assert(!actor.addressRef.get.empty!Msg);
+    assert(!actor.addressRef.get.empty!Reply);
+
+    actor.process(Clock.currTime);
+    actor.process(Clock.currTime);
+
+    assert(actor.addressRef.get.empty!DelayedMsg);
+    assert(actor.addressRef.get.empty!Msg);
+    assert(actor.addressRef.get.empty!Reply);
+
+    assert(sendOk);
+    assert(!shouldNeverHappen);
+}
+
 unittest {
     bool delayOk;
-    static void fn1(ref Tuple!(bool*, "delayOk") c, const string s) @safe {
+    static void fn1(ref Tuple!(bool*, "delayOk", bool*, "delayShouldNeverHappen") c, const string s) @safe {
         *c.delayOk = true;
     }
 
     bool delayShouldNeverHappen;
-    static void fn2(ref Tuple!(bool*, "delayShouldNeverHappen") c, int s) @safe {
+    static void fn2(ref Tuple!(bool*, "delayOk", bool*, "delayShouldNeverHappen") c, int s) @safe {
         *c.delayShouldNeverHappen = true;
     }
 

@@ -978,8 +978,8 @@ package auto makeAction2(T, CtxT = void)(T handler) @safe
     }
 
     alias HArgs = staticMap!(Unqual, Params);
-    pragma(msg, CtxT);
-    pragma(msg, Params);
+    pragma(msg, "makeAction2 context: ", CtxT);
+    pragma(msg, "makeAction2 params: ", Params);
 
     void fn(void* ctx, ref Variant msg) @trusted {
         static if (is(CtxT == void)) {
@@ -1176,9 +1176,9 @@ unittest {
     }
 
     auto aa1 = Actor(makeAddress2);
-    auto a1 = build(&aa1).set("foo1", (int x) {}).exitHandler_(&countExits).finalize;
+    auto a1 = build(&aa1).set("foo1", (int x) {}).exitHandler(&countExits).finalize;
     auto aa2 = Actor(makeAddress2);
-    auto a2 = build(&aa2).set("foo2", (int x) {}).exitHandler_(&countExits).finalize;
+    auto a2 = build(&aa2).set("foo2", (int x) {}).exitHandler(&countExits).finalize;
 
     a1.linkTo(a2.address);
     a1.process(Clock.currTime);
@@ -1206,7 +1206,7 @@ unittest {
     }
 
     auto aa1 = Actor(makeAddress2);
-    auto a1 = build(&aa1).set("a1", (int x) {}).downHandler_(&downMsg).finalize;
+    auto a1 = build(&aa1).set("a1", (int x) {}).downHandler(&downMsg).finalize;
     auto aa2 = Actor(makeAddress2);
     auto a2 = build(&aa2).set("a2", (int x) {}).finalize;
 
@@ -1228,8 +1228,74 @@ unittest {
     assert(count == 1);
 }
 
-private struct BuildActor(CtxT = void) {
-    Actor* actor;
+private struct BuildActor {
+    private Actor* actor;
+
+    Actor* finalize() @safe {
+        auto rval = actor;
+        actor = null;
+        return rval;
+    }
+
+    auto context(CtxT)(CtxT ctx) {
+        actor.setContext(cast(void*) new CtxT(ctx), &cleanupCtx!CtxT);
+        return BuildActorContext!CtxT(actor);
+    }
+
+    auto context(CtxT)(CtxT* ctx) {
+        actor.setContext(cast(void*) ctx, &cleanupCtx!CtxT);
+        return BuildActorContext!CtxT(actor);
+    }
+
+    auto errorHandler(ErrorHandler a) {
+        BuildActorContext!void b;
+        b.errorHandler(a);
+        return b;
+    }
+
+    auto downHandler_(DownHandler a) {
+        BuildActorContext!void b;
+        b.downHandler(a);
+        return b;
+    }
+
+    auto exitHandler_(ExitHandler a) {
+        BuildActorContext!void b;
+        b.exitHandler(a);
+        return b;
+    }
+
+    auto exceptionHandler_(ExceptionHandler a) {
+        BuildActorContext!void b;
+        b.exceptionHandler(a);
+        return b;
+    }
+
+    auto defaultHandler_(DefaultHandler a) {
+        BuildActorContext!void b;
+        b.defaultHandler(a);
+        return b;
+    }
+
+    auto set(BehaviorT)(string name, BehaviorT behavior)
+            if ((isFunction!BehaviorT || isFunctionPointer!BehaviorT)
+                && !is(ReturnType!BehaviorT == void)) {
+        BuildActorContext!void b;
+        b.set(name, behavior);
+        return b;
+    }
+
+    auto set(BehaviorT)(string name, BehaviorT behavior)
+            if ((isFunction!BehaviorT || isFunctionPointer!BehaviorT)
+                && is(ReturnType!BehaviorT == void)) {
+        BuildActorContext!void b;
+        b.set(name, behavior);
+        return b;
+    }
+}
+
+private struct BuildActorContext(CtxT = void) {
+    private Actor* actor;
 
     Actor* finalize() @safe {
         auto rval = actor;
@@ -1242,34 +1308,24 @@ private struct BuildActor(CtxT = void) {
         return this;
     }
 
-    auto downHandler_(DownHandler a) {
+    auto downHandler(DownHandler a) {
         actor.downHandler_ = a;
         return this;
     }
 
-    auto exitHandler_(ExitHandler a) {
+    auto exitHandler(ExitHandler a) {
         actor.exitHandler_ = a;
         return this;
     }
 
-    auto exceptionHandler_(ExceptionHandler a) {
+    auto exceptionHandler(ExceptionHandler a) {
         actor.exceptionHandler_ = a;
         return this;
     }
 
-    auto defaultHandler_(DefaultHandler a) {
+    auto defaultHandler(DefaultHandler a) {
         actor.defaultHandler_ = a;
         return this;
-    }
-
-    auto context(CtxT)(CtxT ctx) {
-        actor.setContext(cast(void*) new CtxT(ctx), &cleanupCtx!CtxT);
-        return BuildActor!CtxT(actor);
-    }
-
-    auto context(CtxT)(CtxT* ctx) {
-        actor.setContext(cast(void*) ctx, &cleanupCtx!CtxT);
-        return BuildActor!CtxT(actor);
     }
 
     auto set(BehaviorT)(string name, BehaviorT behavior)
@@ -1297,7 +1353,7 @@ private struct BuildActor(CtxT = void) {
     }
 }
 
-package BuildActor!void build(Actor* a) @safe {
+package BuildActor build(Actor* a) @safe {
     return typeof(return)(a);
 }
 
@@ -1365,7 +1421,7 @@ unittest {
     }
 
     bool shouldNeverHappen;
-    static void fn2(ref Tuple!(bool*, "shouldNeverHappen", bool*, "shouldNeverHappen") c, int s) @safe {
+    static void fn2(ref Tuple!(bool*, "sendOk", bool*, "shouldNeverHappen") c, int s) @safe {
         *c.shouldNeverHappen = true;
     }
 

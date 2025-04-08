@@ -176,7 +176,7 @@ enum ExitReason : ubyte {
 ulong makeSignature(Types...)() @safe {
     import std.traits : Unqual;
 
-    // pragma(msg, Types);
+    pragma(msg, "makeSignature ", Types);
 
     ulong rval;
     static foreach (T; Types) {

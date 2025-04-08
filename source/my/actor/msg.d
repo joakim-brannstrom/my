@@ -5,6 +5,7 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.actor.msg;
 
+import logger = std.logger;
 import std.meta : staticMap, AliasSeq;
 import std.traits : Unqual, Parameters, isFunction, isFunctionPointer;
 import std.typecons : Tuple, tuple;
@@ -14,8 +15,7 @@ public import std.datetime : SysTime, Duration, dur;
 
 import my.actor.mailbox;
 import my.actor.common : ExitReason, makeSignature, SystemError;
-import my.actor.actor : Actor, makeRequest, makeReply2, makePromise,
-    ErrorHandler, Promise, RequestResult;
+import my.actor.actor : Actor, makeReply2, makePromise, ErrorHandler, Promise, RequestResult;
 import my.actor.system_msg;
 import my.actor.typed : isTypedAddress, isTypedActor, isTypedActorImpl,
     typeCheckMsg, ParamsToTuple, ReturnToTupleOrVoid,
@@ -226,6 +226,7 @@ package void thenUnsafe(T, CtxT = void)(scope RequestSendThen r, T handler,
     // this order ensure that there is always a handler that can receive the message.
 
     () @safe {
+        logger.info("thenUnsafe ", CtxT.stringof);
         auto reply = makeReply2!(T, CtxT)(handler);
         reply.ctx = ctx;
         r.rs.self.register(r.rs.replyId, timeout, reply, onError);

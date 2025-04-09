@@ -5,6 +5,7 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.actor.typed;
 
+import logger = std.logger;
 import std.datetime : SysTime, Clock;
 import std.meta : AliasSeq, staticMap;
 import std.traits : Unqual, isFunction, isDelegate, Parameters, ReturnType, isFunctionPointer;
@@ -195,6 +196,7 @@ auto impl(TActor, Behavior...)(TActor actor, Behavior behaviors)
             bactor.set(Parameters!(b).stringof, behaviors[i]);
         }
     }
+    logger.info("typed impl ", StartIdx, " ", behaviors.stringof);
     return TypedActorImpl!(TActor.AllowedMessages)(bactor.finalize);
 }
 

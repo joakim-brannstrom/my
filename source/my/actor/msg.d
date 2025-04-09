@@ -194,15 +194,13 @@ RequestSendThen send(Args...)(RequestSend r, auto ref Args args) {
     return () @trusted { return RequestSendThen(r, msg); }();
 }
 
-private struct ThenContext(Captures...) {
-    alias Ctx = Tuple!Captures;
-
+private struct ThenContext(CtxT, Captures...) {
     RequestSendThen r;
-    Ctx* ctx;
+    CtxT* ctx;
 
     void then(T)(T handler, ErrorHandler onError = null)
             if (isFunction!T || isFunctionPointer!T) {
-        thenUnsafe!(T, Ctx)(r, handler, cast(void*) ctx, onError);
+        thenUnsafe!(T, CtxT)(r, handler, cast(void*) ctx, onError);
         ctx = null;
     }
 }
@@ -287,13 +285,11 @@ void then(TR, T, CtxT = void)(scope TR tr, T handler, ErrorHandler onError = nul
     then(tr.rs, handler, onError);
 }
 
-private struct TypedThenContext(TR, Captures...) {
+private struct TypedThenContext(TR, CtxT, Captures...) {
     import my.actor.actor : checkRefForContext, checkMatchingCtx;
 
-    alias Ctx = Tuple!Captures;
-
     TR r;
-    Ctx* ctx;
+    CtxT* ctx;
 
     void then(T)(T handler, ErrorHandler onError = null)
             if ((isFunction!T || isFunctionPointer!T) && typeCheckMsg!(TR.TypeAddress,
@@ -301,9 +297,9 @@ private struct TypedThenContext(TR, Captures...) {
         // better error message for the user by checking in the body instead of
         // the constraint because the constraint gagges the static assert
         // messages.
-        checkMatchingCtx!(Parameters!T[0], Ctx);
+        checkMatchingCtx!(Parameters!T[0], CtxT);
         checkRefForContext!handler;
-        .thenUnsafe!(T, Ctx)(r.rs, handler, cast(void*) ctx, onError);
+        .thenUnsafe!(T, CtxT)(r.rs, handler, cast(void*) ctx, onError);
         ctx = null;
     }
 }
@@ -322,14 +318,26 @@ Capture!T capture(T...)(auto ref T args)
 }
 
 auto capture(Captures...)(RequestSendThen r, auto ref Captures captures) {
-    // TODO: how to read the identifiers from captures? Using
-    // ParameterIdentifierTuple didn't work.
-    auto ctx = new Tuple!Captures(captures);
-    return ThenContext!Captures(r, ctx);
+    static if (Captures.length == 1 && isCapture!(Captures[0])) {
+        alias CtxT = Captures[0];
+        auto ctx = new CtxT;
+        *ctx = captures;
+        return ThenContext!(CtxT, Captures)(r, ctx);
+    } else {
+        auto ctx = new Tuple!Captures(captures);
+        return ThenContext!(Tuple!Captures, Captures)(r, ctx);
+    }
 }
 
 auto capture(TR, Captures...)(TR r, auto ref Captures captures)
         if (is(TR : TypedRequestSendThen!(TAddress, Params), TAddress, Params...)) {
-    auto ctx = new Tuple!Captures(captures);
-    return TypedThenContext!(TR, Captures)(r, ctx);
+    static if (Captures.length == 1 && isCapture!(Captures[0])) {
+        alias CtxT = Captures[0];
+        auto ctx = new CtxT;
+        *ctx = captures;
+        return TypedThenContext!(TR, CtxT, Captures)(r, ctx);
+    } else {
+        auto ctx = new Tuple!Captures(captures);
+        return TypedThenContext!(TR, Tuple!Captures, Captures)(r, ctx);
+    }
 }

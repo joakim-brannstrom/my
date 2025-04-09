@@ -751,6 +751,7 @@ package:
         auto front = addr.get.pop!Reply;
         scope (exit)
             .destroy(front);
+        logger.trace("reply signature: ", front.get.id);
 
         if (auto v = front.get.id in awaitedResponses) {
             // TODO: reduce the lookups on front.id
@@ -1016,7 +1017,7 @@ package Closure!(ReplyHandler, void*) makeReply2(T, CtxT = void)(T handler) @saf
 
     alias HArgs = staticMap!(Unqual, Params);
     pragma(msg, "makeReply2 context: ", CtxT);
-    pragma(msg, "makeReply2 params: ", Params);
+    pragma(msg, "makeReply2 params: ", HArgs);
 
     void fn(void* ctx, ref Variant msg) @trusted {
         static if (is(CtxT == void)) {
@@ -1060,10 +1061,24 @@ package void checkRefForContext(alias handler)() {
 }
 
 package void checkMatchingCtx(CtxParam, CtxT)() {
-    static if (!is(CtxT == CtxParam)) {
-        static assert(__traits(compiles, { auto x = CtxParam(CtxT.init.expand); }),
-                "mismatch between the context type " ~ CtxT.stringof
-                ~ " and the first parameter " ~ CtxParam.stringof);
+    import my.actor.msg : isCapture;
+
+    static string errorStr(int i) {
+        import std.conv : to;
+
+        if (i == -1)
+            return "mismatch between the context type " ~ CtxT.stringof
+                ~ " and the first parameter " ~ CtxParam.stringof;
+        return "mismatch between the context type " ~ CtxT.stringof
+            ~ " and the first parameter " ~ CtxParam.stringof ~ " at index " ~ i.to!string;
+    }
+
+    static if (isCapture!CtxT && isCapture!CtxParam) {
+        static foreach (const i; 0 .. CtxParam.Types.length) {
+            static assert(__traits(isSame, CtxParam.Types[i], CtxT.Types[i]), errorStr(i));
+        }
+    } else static if (!is(CtxT == CtxParam)) {
+        static assert(__traits(compiles, { auto x = CtxParam(CtxT.init.expand); }), errorStr(-1));
     }
 }
 
@@ -1144,13 +1159,14 @@ package auto makeRequest2(T, CtxT = void)(T handler) @safe {
 
     alias HArgs = staticMap!(Unqual, Params);
     pragma(msg, "makeRequest2 context: ", CtxT);
-    pragma(msg, "makeRequest2 params: ", Params);
+    pragma(msg, "makeRequest2 params: ", HArgs);
+    logger.tracef("%s makeRequest2 signature: %s", HArgs.stringof, makeSignature!HArgs);
 
     void fn(void* rawCtx, ref Variant msg, ulong replyId, WeakAddress replyTo) @trusted {
         static if (is(CtxT == void)) {
             auto r = handler(msg.get!(Tuple!HArgs).expand);
         } else {
-            auto ctx = cast(CtxT*) rawCtx;
+            auto ctx = cast(CtxParam*) cast(CtxT*) rawCtx;
             auto r = handler(*ctx, msg.get!(Tuple!HArgs).expand);
         }
 
@@ -1351,7 +1367,7 @@ private struct BuildActorContext(CtxT = void) {
     auto set(BehaviorT)(string name, BehaviorT behavior)
             if ((isFunction!BehaviorT || isFunctionPointer!BehaviorT)
                 && !is(ReturnType!BehaviorT == void)) {
-        auto act = makeRequest2(behavior);
+        auto act = makeRequest2!(BehaviorT, CtxT)(behavior);
         actor.register(name, act.signature, act.request);
         return this;
     }
@@ -1516,8 +1532,8 @@ unittest {
 
     auto rcReq = safeRefCounted(42);
     bool calledOk;
-    static string fn(ref Tuple!(bool*, "calledOk", SafeRefCounted!int) ctx,
-            const string s, const string b) {
+    static string fn(ref Tuple!(bool*, "calledOk", SafeRefCounted!(int,
+            RefCountedAutoInitialize.no)) ctx, const string s, const string b) {
         assert(2 == ctx[1].refCountedStore.refCount);
         if (s == "apa")
             *ctx.calledOk = true;
@@ -1526,7 +1542,7 @@ unittest {
 
     auto rcReply = safeRefCounted(42);
     bool calledReply;
-    static void reply(ref Tuple!(bool*, SafeRefCounted!(int,
+    static void reply(ref Tuple!(bool*, "calledOk", SafeRefCounted!(int,
             RefCountedAutoInitialize.no)) ctx, const string s) {
         *ctx[0] = s == "foo";
         assert(2 == ctx[1].refCountedStore.refCount);

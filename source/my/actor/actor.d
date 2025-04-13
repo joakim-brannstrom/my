@@ -1070,7 +1070,7 @@ package void checkMatchingCtx(CtxParam, CtxT)() {
             return "mismatch between the context type " ~ CtxT.stringof
                 ~ " and the first parameter " ~ CtxParam.stringof;
         return "mismatch between the context type " ~ CtxT.stringof
-            ~ " and the first parameter " ~ CtxParam.stringof ~ " at index " ~ i.to!string;
+            ~ " and first parameter " ~ CtxParam.stringof ~ " at index " ~ i.to!string;
     }
 
     static if (isCapture!CtxT && isCapture!CtxParam) {
@@ -1367,6 +1367,7 @@ private struct BuildActorContext(CtxT = void) {
     auto set(BehaviorT)(string name, BehaviorT behavior)
             if ((isFunction!BehaviorT || isFunctionPointer!BehaviorT)
                 && !is(ReturnType!BehaviorT == void)) {
+        logger.info(name, " ", CtxT.stringof);
         auto act = makeRequest2!(BehaviorT, CtxT)(behavior);
         actor.register(name, act.signature, act.request);
         return this;
@@ -1375,6 +1376,7 @@ private struct BuildActorContext(CtxT = void) {
     auto set(BehaviorT)(string name, BehaviorT behavior)
             if ((isFunction!BehaviorT || isFunctionPointer!BehaviorT)
                 && is(ReturnType!BehaviorT == void)) {
+        logger.info(name, " ", CtxT.stringof);
         auto act = makeAction2!(BehaviorT, CtxT)(behavior);
         actor.register(name, act.signature, act.action);
         return this;
@@ -1383,6 +1385,7 @@ private struct BuildActorContext(CtxT = void) {
     auto set(BehaviorT, CtxT)(string name, BehaviorT behavior)
             if ((isFunction!BehaviorT || isFunctionPointer!BehaviorT)
                 && is(ReturnType!BehaviorT == void)) {
+        logger.info(name, " ", CtxT.stringof);
         auto act = makeAction2!(BehaviorT, CtxT)(behavior);
         actor.register(name, act.signature, act.action);
         return this;
@@ -1397,20 +1400,22 @@ package BuildActor build(Actor* a) @safe {
 Actor* impl(Behavior...)(Actor* self, Behavior behaviors) {
     import my.actor.msg : isCapture, Capture;
 
-    auto bactor = build(self);
-
     static if (Behavior.length > 1) {
         static if (isCapture!(Behavior[0])) {
-            enum startIdx = 1;
-            bactor.context(behaviors[0]);
+            enum StartIdx = 1;
+            auto bactor = build(self).context(behaviors[0]);
         } else {
-            enum startIdx = 0;
+            auto bactor = build(self);
+            enum StartIdx = 0;
         }
     } else {
-        enum startIdx = 0;
+        auto bactor = build(self);
+        enum StartIdx = 0;
     }
 
-    static foreach (const i; startIdx .. Behavior.length) {
+    logger.info("hello ", StartIdx, " ", " ", Behavior.stringof);
+
+    static foreach (const i; StartIdx .. Behavior.length) {
         {
             alias b = Behavior[i];
             static if (!(isFunction!(b) || isFunctionPointer!(b)))

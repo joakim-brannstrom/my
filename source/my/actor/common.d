@@ -5,6 +5,8 @@ Author: Joakim Brännström (joakim.brannstrom@gmx.com)
 */
 module my.actor.common;
 
+import logger = std.logger;
+
 import core.sync.mutex : Mutex;
 
 /** Multiple producer, "single" consumer thread safe queue.
@@ -177,6 +179,7 @@ ulong makeSignature(Types...)() @safe {
     import std.traits : Unqual;
 
     pragma(msg, "makeSignature ", Types);
+    logger.info("hello ", Types.stringof);
 
     ulong rval;
     static foreach (T; Types) {

@@ -311,10 +311,14 @@ enum isFirstParamCtx(Fn, CtxT) = is(Parameters!Fn[0] == CtxT);
 /// Convenient function for capturing the actor itself when spawning.
 alias CSelf(T = Actor*) = Capture!(T, "self");
 
-Capture!T capture(T...)(auto ref T args)
+auto capture(T...)(auto ref T args)
         if (!is(T[0] == RequestSendThen)
             && !is(T[0] == TypedRequestSendThen!(TAddress, Params), TAddress, Params...)) {
-    return Tuple!T(args);
+    static if (T.length == 1 && isCapture!(T[0])) {
+        return args[0];
+    } else {
+        return Tuple!T(args);
+    }
 }
 
 auto capture(Captures...)(RequestSendThen r, auto ref Captures captures) {

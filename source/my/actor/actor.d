@@ -539,6 +539,9 @@ package:
                 logger.tracef("%X [%s] %s", id, name, state_).collectException;
             }
         }
+        if (addr.get.hasMessage) {
+            debug logger.tracef("mailbox length %s", addr.get.length).collectException;
+        }
 
         final switch (state_) {
         case ActorState.waiting:
@@ -1534,7 +1537,6 @@ unittest {
 @("shall process a request->then chain xyz")
 @system unittest {
     // checking capture is correctly setup/teardown by using captured rc.
-
     auto rcReq = safeRefCounted(42);
     bool calledOk;
     static string fn(ref Tuple!(bool*, "calledOk", SafeRefCounted!(int,
@@ -1622,21 +1624,29 @@ unittest {
     actor.request(actor.address, infTimeout).send(A("apa")).capture(&calledReply).then(&reply);
     actor.request(actor.address, infTimeout).send(B("apa")).capture(&calledReply).then(&reply);
 
+    writeln(1);
+    // process first request, which return a promise so calledReply should not be called
     actor.process(Clock.currTime);
-    assert(calledOk == 1); // first request
+    assert(calledOk == 1);
     assert(calledReply == 0);
 
+    // by delivering an answer it is added to the actors mailbox
     fn1p.deliver("foo");
 
+    // but it shouldn't trigger until the actor proces
     assert(calledReply == 0);
 
+    writeln(2);
+    // read the reply delivered by the promise fn1p
     actor.process(Clock.currTime);
-    assert(calledOk == 2); // second request triggered
+    assert(calledOk == 2);
     assert(calledReply == 1);
 
+    // by delivering the second answer to the actor the reply handler should again be called
     fn2p.deliver("foo");
-    actor.process(Clock.currTime);
 
+    writeln(3);
+    actor.process(Clock.currTime);
     assert(calledReply == 2);
 
     actor.shutdown;

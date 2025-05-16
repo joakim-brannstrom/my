@@ -755,8 +755,10 @@ package:
         scope (exit)
             .destroy(front);
         logger.trace("reply signature: ", front.get.id);
+        logger.trace("awaiting responses", awaitedResponses);
 
         if (auto v = front.get.id in awaitedResponses) {
+            logger.tracef("using awaiting response %s %s", v, front.get.id);
             // TODO: reduce the lookups on front.id
             v.behavior(front.get.data);
             awaitedResponses.remove(front.get.id);
@@ -1179,6 +1181,9 @@ package auto makeRequest2(T, CtxT = void)(T handler) @safe {
                     "the promise MUST be constructed before it is returned");
                 a.data.borrow!((ref a) => a.replyId = replyId);
                 a.data.borrow!((ref a) => a.replyTo = replyTo);
+                logger.info("promise is empty? ", a.empty, " ",
+                    a.data.borrow!((ref a) => a.replyId), " ",
+                    a.data.borrow!((ref a) => a.replyTo));
             }, (data) {
                 enum wrapInTuple = !is(typeof(data) : Tuple!U, U);
                 if (auto rc = replyTo.lock.get) {
@@ -1599,16 +1604,19 @@ unittest {
 
     int calledOk;
     auto fn1p = makePromise!string;
-    static RequestResult!string fn1(ref Capture!(int*, "calledOk", Promise!string, "p") c, A a) @trusted {
+    static RequestResult!string fn1(ref Capture!(int*, "calledOk",
+            Promise!string, "fn1p", Promise!string, "fn2p") c, A a) @trusted {
         if (a.v == "apa")
             (*c.calledOk)++;
-        return typeof(return)(c.p);
+        return typeof(return)(c.fn1p);
     }
 
     auto fn2p = makePromise!string;
-    static Promise!string fn2(ref Capture!(int*, "calledOk", Promise!string, "p") c, B a) {
+    static Promise!string fn2(ref Capture!(int*, "calledOk", Promise!string,
+            "fn1p", Promise!string, "fn2p") c, B a) {
+        writeln(5, " promise requeest");
         (*c.calledOk)++;
-        return c.p;
+        return c.fn2p;
     }
 
     int calledReply;
@@ -1618,8 +1626,8 @@ unittest {
     }
 
     auto aa1 = Actor(makeAddress2);
-    auto actor = build(&aa1).context(capture(&calledOk, fn1p)).set("actor",
-            &fn1).set("actor", &fn2).finalize;
+    auto actor = build(&aa1).context(capture(&calledOk, fn1p, fn2p))
+        .set("actor", &fn1).set("actor", &fn2).finalize;
 
     actor.request(actor.address, infTimeout).send(A("apa")).capture(&calledReply).then(&reply);
     actor.request(actor.address, infTimeout).send(B("apa")).capture(&calledReply).then(&reply);
@@ -1645,8 +1653,10 @@ unittest {
     // by delivering the second answer to the actor the reply handler should again be called
     fn2p.deliver("foo");
 
-    writeln(3);
-    actor.process(Clock.currTime);
+    writeln(3, " calledReply ", calledReply);
+    writeln(4, " ", fn2p.empty);
+    foreach (_; 0 .. 3)
+        actor.process(Clock.currTime);
     assert(calledReply == 2);
 
     actor.shutdown;

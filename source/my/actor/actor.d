@@ -224,6 +224,11 @@ void logExceptionHandler(scope ref Actor self, scope Exception e) @safe nothrow 
     self.errorReason = SystemError.runtimeError;
     try {
         logger.infof("[%s] shutdown: exception: %s: ", self.name, e.msg);
+        version (mylib_actor_trace) {
+            () @trusted {
+                logger.infof("[%s] shutdown: exception stack trace: %s: ", self.name, e);
+            }();
+        }
     } catch (Exception e) {
     }
     self.forceShutdown;
